@@ -293,6 +293,13 @@ impl Not for Piece {
 }
 
 impl Square {
+    pub const fn new_from_n(n: i32) -> Self {
+        if Square::is_square_valid(n){
+            unsafe {std::mem::transmute(n)}
+        }else {
+            Self::SqNone
+        }
+    }
     pub const fn flip_rank(&self) -> Self {
         let result = *self as i32 ^ Square::SqA8 as i32;
         if Self::is_square_valid(result){
@@ -359,7 +366,7 @@ impl Square {
         r
     }
 
-    const fn is_square_valid(square: i32) -> bool {
+    pub const fn is_square_valid(square: i32) -> bool {
         return square >= Square::SqA1 as i32 && square <= Square::SqH8 as i32
     }
 }
