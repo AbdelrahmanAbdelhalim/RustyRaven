@@ -1,4 +1,4 @@
-use std::ops::{Add, AddAssign, Sub, SubAssign, Not, BitAnd};
+use std::ops::{Add, AddAssign, Sub, SubAssign, Not, BitAnd, BitOr, BitXor, BitOrAssign, BitXorAssign};
 pub type Bitboard = u64;
 pub type Value = i32;
 pub type Key = u64;
@@ -139,6 +139,7 @@ pub enum Square {
     SquareZero = -1,
 }
 
+#[derive(PartialEq)]
 pub enum PieceType {
     AllPieces = -1,
     NoPieceType,
@@ -289,6 +290,52 @@ impl Not for Piece {
         }else {
             panic!()
         } 
+    }
+}
+
+impl BitAnd<Square> for Bitboard {
+    type Output = Bitboard;
+    fn bitand(self, rhs: Square) -> Bitboard {
+        self & rhs.bb()
+    }
+}
+
+impl BitOr<Square> for Bitboard {
+    type Output = Bitboard;
+    fn bitor(self, rhs: Square) -> Bitboard {
+        self & rhs.bb()
+    }
+}
+impl BitXor<Square> for Bitboard {
+    type Output = Bitboard;
+    fn bitxor(self, rhs: Square) -> Bitboard {
+        self & rhs.bb()
+    }
+}
+impl BitOrAssign<Square> for Bitboard {
+    fn bitor_assign(&mut self, rhs: Square) {
+        let result = *self | rhs.bb();
+        *self = result;
+    }
+}
+impl BitXorAssign<Square> for Bitboard {
+    fn bitxor_assign(&mut self, rhs: Square) {
+        let result = *self ^ rhs.bb();
+        *self = result;
+    }
+}
+
+impl BitAnd<Bitboard> for Square {
+    type Output = Bitboard;
+    fn bitand(self, rhs: Bitboard) -> Bitboard {
+        rhs & self
+    }
+}
+
+impl BitOr<Bitboard> for Square {
+    type Output = Bitboard;
+    fn bitor(self, rhs: Bitboard) -> Bitboard {
+        rhs | self
     }
 }
 
@@ -494,16 +541,18 @@ struct Move {
     data: u16,
 }
 
+impl PartialEq for Move {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+    }
+}
+
 impl Move {
     pub const fn new(data: u16) -> Self {
         Move {
             data: data,
         }
     }
-
-    // pub const fn make(from: Square, to: Square, pt: PieceType) -> Self {
-
-    // }
 
     pub const fn from_to(&self) -> u16 {
         self.data & 0xFFF
@@ -571,11 +620,5 @@ impl Move {
 
     pub const fn is_ok(&self) -> bool {
         self.data != Self::none().data && self.data != Self::null().data
-    }
-}
-
-impl PartialEq for Move {
-    fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
     }
 }

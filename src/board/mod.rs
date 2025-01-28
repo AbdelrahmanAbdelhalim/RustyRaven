@@ -1,2 +1,1 @@
-mod bitboard;
-mod zobrist;
+mod bbtables;
