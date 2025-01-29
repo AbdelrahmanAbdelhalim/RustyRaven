@@ -1,3 +1,4 @@
+use crate::misc::Prng;
 use crate::types::*;
 use std::cmp::*;
 
@@ -24,17 +25,18 @@ const RANK6BB: Bitboard = RANK1BB << (8 * 5);
 const RANK7BB: Bitboard = RANK1BB << (8 * 6);
 const RANK8BB: Bitboard = RANK1BB << (8 * 7);
 
-const sqnb: usize = Square::SquareNb as usize - 1;
-const ptnb: usize = PieceType::PieceTypeNb as usize;
-const clornb: usize = Color::ColorNb as usize;
+const SQNB: usize = Square::SquareNb as usize - 1;
+const PTNB: usize = PieceType::PieceTypeNb as usize;
+const COLORNB: usize = Color::ColorNb as usize;
 const IS64BIT: bool = cfg!(target_pointer_width = "64");
 
 static mut POPCNT: [u8; 1 << 16] = [0; 1 << 16];
-static mut SQUARE_DISTANCE: [[u8; sqnb]; sqnb] = [[0; sqnb]; sqnb];
-static mut LINE_BB: [[u8; sqnb]; sqnb] = [[0; sqnb]; sqnb];
-static mut BETWEEN_BB: [[u8; sqnb]; sqnb] = [[0; sqnb]; sqnb];
-static mut PSEUDO_ATTACKS: [[u8; sqnb]; ptnb] = [[0; sqnb]; ptnb];
-static mut PAWN_ATTACKS: [[u8; sqnb]; clornb] = [[0; sqnb]; clornb];
+static mut SQUARE_DISTANCE: [[u8; SQNB]; SQNB] = [[0; SQNB]; SQNB];
+static mut LINE_BB: [[u8; SQNB]; SQNB] = [[0; SQNB]; SQNB];
+static mut BETWEEN_BB: [[u8; SQNB]; SQNB] = [[0; SQNB]; SQNB];
+static mut PSEUDO_ATTACKS: [[u8; SQNB]; PTNB] = [[0; SQNB]; PTNB];
+static mut PAWN_ATTACKS: [[u8; SQNB]; COLORNB] = [[0; SQNB]; COLORNB];
+
 
 const fn more_than_one(bb: Bitboard) -> bool {
     bb & bb - 1 == 0 // Resets the highest bit
@@ -113,14 +115,22 @@ fn sliding_attack(pt: PieceType, sq: Square, occupied: Bitboard) -> Bitboard {
 }
 
 //This holds all magic bitboards relevant data for a single square
-struct Magic {
+struct Magic<'a> {
     mask: Bitboard,
     magic: Bitboard,
-    // attacks: &'a [Bitboard],
+    attacks: &'a mut [Bitboard],
     shift: usize,
 }
 
-impl Magic {
+impl <'a> Magic<'a> {
+    pub fn default() -> Self {
+        Self {
+            mask: 0,
+            magic: 0,
+            attacks: &mut [],
+            shift: 0,
+        }
+    }
     pub fn index(&self, occupied: Bitboard) -> usize {
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("bmi2") {
@@ -137,30 +147,30 @@ impl Magic {
     }
 }
 
-struct BbTables {
-    SQUARE_DISTANCE: [[u8; sqnb]; sqnb],
-    LINE_BB: [[u8; sqnb]; sqnb],
-    BETWEEN_BB: [[u8; sqnb]; sqnb],
-    PSEUDO_ATTACKS: [[Bitboard; sqnb]; ptnb],
-    PAWN_ATTACKS: [[u8; sqnb]; clornb],
+struct BbTables<'a> {
+    SQUARE_DISTANCE: [[u8; SQNB]; SQNB],
+    LINE_BB: [[Bitboard; SQNB]; SQNB],
+    BETWEEN_BB: [[Bitboard; SQNB]; SQNB],
+    PSEUDO_ATTACKS: [[Bitboard; SQNB]; PTNB],
+    PAWN_ATTACKS: [[Bitboard; SQNB]; COLORNB],
     POPCNT: [u8; 1 << 16],
-    // RookMagics: [Magic; sqnb],
-    // BishopMagics: [Magic; sqnb],
+    RookMagics: [Magic<'a>; SQNB],
+    BishopMagics: [Magic<'a>; SQNB],
 }
 
-impl BbTables {
+impl <'a> BbTables <'a> {
     fn new() -> Self {
-        let mut sqdt = [[0; sqnb]; sqnb];
-        let mut pawn_attacks = [[0; sqnb]; clornb];
-        let mut pseudo_attacks: [[Bitboard; sqnb]; ptnb] = [[0; sqnb]; ptnb];
+        let mut sqdt = [[0; SQNB]; SQNB];
+        let mut pawn_attacks = [[0; SQNB]; COLORNB];
+        let mut pseudo_attacks: [[Bitboard; SQNB]; PTNB] = [[0; SQNB]; PTNB];
         let mut popcnt = [0; 1 << 16];
-        let mut linebb = [[0; sqnb]; sqnb];
-        let mut betweenbb = [[0; sqnb]; sqnb];
+        let mut linebb = [[0; SQNB]; SQNB];
+        let mut betweenbb = [[0; SQNB]; SQNB];
 
-        let mut RookMagics: [Magic; sqnb];
-        let mut BishopMagics: [Magic; sqnb];
-        let mut RookTable: [Magic; 0x19000];
-        let mut BishopTable: [Magic; 0x1480];
+        let mut rook_magics: [Magic; SQNB] = core::array::from_fn(|_| Magic::default());
+        let mut bishop_magics: [Magic; SQNB] = core::array::from_fn(|_| Magic::default());
+        let mut rook_table: [Bitboard; 0x19000] = [0;0x19000];
+        let mut bishop_table: [Bitboard; 0x1480] = [0;0x1480];
 
         //init popcount
         for i in 0..(1 << 16) {
@@ -177,8 +187,8 @@ impl BbTables {
                 sqdt[i][j] = max(s1.rank_distance_from(s2), s1.file_distance_from(s2)) as u8;
             }
         }
-        // Self::init_magics(PieceType::Rook, &RookTable, &RookMagics);
-        // Self::init_magics(PieceType::Bishop, &BishopTable, &BishopMagics);
+        Self::init_magics(PieceType::Rook, &mut rook_table, &mut rook_magics);
+        Self::init_magics(PieceType::Bishop, &mut bishop_table, &mut bishop_magics);
 
         //init pawn attacks, pseudo attacks
         for i in a..=b {
@@ -206,44 +216,83 @@ impl BbTables {
             PSEUDO_ATTACKS: pseudo_attacks,
             LINE_BB: linebb,
             BETWEEN_BB: betweenbb,
-            // RookMagics: RookMagics,
-            // BishopMagics: BishopMagics,
+            RookMagics: rook_magics,
+            BishopMagics: bishop_magics,
         }
     }
 
-    fn init_magics(pt: PieceType, table: &[Bitboard], magics: &mut [Magic]) {
+    fn init_magics<'b>(pt: PieceType, table: &'b mut [Bitboard], magics: &'b mut [Magic]) {
         //Optimal seeds to ipick the correct magic number in the shortest time
         let seeds = [
             [8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020],
             [728, 10316, 55013, 32803, 12281, 15100, 16645, 255],
         ];
 
-        let occupancy: [Bitboard;4096];
-        let reference: [Bitboard;4096];
-        let edges: Bitboard;
-        let b: Bitboard;
-        let epoch: [i32;4096] = [0;4096];
+        let mut occupancy: [Bitboard;4096] = [0;4096];
+        let mut reference: [Bitboard;4096] = [0;4096];
+        let mut b: Bitboard;
+        let mut epoch: [i32;4096] = [0;4096];
         let mut cnt: i32 = 0;
-        let mut size: i32 = 0;
+        let mut size: usize = 0;
 
-        let a = Square::SqA1 as usize;
-        let b = Square::SqH8 as usize;
+        let i = Square::SqA1 as usize;
+        let j = Square::SqH8 as usize;
 
-        for s in a..=b {
+        for s in i..=j {
             let sq: Square = Square::new_from_n(s as i32);
             let edges: Bitboard = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
             let mut m = &mut magics[s]; 
-            m.mask = Self::sliding_attack(&pt, sq, 0);
 
+            m.mask = Self::sliding_attack(&pt, sq, 0) & !edges;
             let mut arch = 32;
             if IS64BIT {
                 arch = 64;
             }
             m.shift = (arch - m.mask.count_ones()) as usize;
+
+            if sq == Square::SqA1 {
+                m.attacks = &mut table[0..];
+            }else {
+                m.attacks = &mut magics[s - 1].attacks[size..];
+            }
+            b = 0;
+            size = 0;
+
+            'inner: loop {
+                occupancy[size] = b;
+                reference[size] = Self::sliding_attack(&pt, sq, b);
+                size += 1;
+                b = (b - m.mask) & m.mask;
+                if b == 0 {
+                    break 'inner
+                }
+            }
+
+            let mut prng: Prng = Prng::new(seeds[IS64BIT as usize][sq.rank_of() as usize]);
+            let mut k = 0;
+
+            while k < size {
+                m.magic = 0;
+                while ((m.magic * m.mask) >> 56).count_ones() < 6 {
+                    m.magic = prng.sparse_rand::<Bitboard>();
+                }
+                k = 0;
+                'inner: while k < size {
+                    cnt += 1;
+                    k += 1;
+                    let idx = m.index(occupancy[i]);
+                    if epoch[idx] < cnt {
+                        epoch[idx] = cnt;
+                        m.attacks[idx] = reference[i];
+                    }else if m.attacks[idx] != reference[i] {
+                        break 'inner
+                    }
+                }
+            }
         }
     }
 
-    fn safe_destination(s1: Square, step: i32, dist: &[[u8; sqnb]; sqnb]) -> Bitboard {
+    fn safe_destination(s1: Square, step: i32, dist: &[[u8; SQNB]; SQNB]) -> Bitboard {
         let res = s1 as i32 + step;
         if !Square::is_square_valid(res) {
             0

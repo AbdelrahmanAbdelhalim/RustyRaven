@@ -125,7 +125,7 @@ pub enum Rank {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Square {
     SqA1 = 0, SqB1, SqC1, SqD1, SqE1, SqF1, SqG1, SqH1,
     SqA2, SqB2, SqC2, SqD2, SqE2, SqF2, SqG2, SqH2,
