@@ -139,7 +139,7 @@ pub enum Square {
     SquareZero = -1,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum PieceType {
     AllPieces = -1,
     NoPieceType,
