@@ -33,6 +33,7 @@ const RANK1BB: Bitboard = 0xFF;
 const FILEABB: Bitboard = 0x0101010101010101;
 
 #[repr(i32)]
+#[derive(Debug, PartialEq)]
 pub enum Color {
     White = 0,
     Black = 1,
@@ -66,6 +67,7 @@ pub enum Bound {
 }
 
 #[repr(u8)]
+#[derive(Debug, PartialEq)]
 pub enum Piece {
     NoPiece = 0,
     WPawn,
@@ -84,7 +86,7 @@ pub enum Piece {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Direction {
     North = 8,
     East = 1,
@@ -139,7 +141,7 @@ pub enum Square {
     SquareZero = -1,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PieceType {
     AllPieces = -1,
     NoPieceType,
@@ -148,6 +150,7 @@ pub enum PieceType {
 }
 
 #[repr(i32)]
+#[derive(Debug, PartialEq)]
 pub enum MoveType {
     Normal,
     Promotion = 1 << 14,
@@ -285,7 +288,7 @@ impl Not for Piece {
     type Output = Self;
     fn not(self) -> Self {
         let result = self as i8 ^ 8;
-        if result >= 0 && result <= 6 && result >= 9 && result <= 14 {
+        if (result >= 0 && result <= 6) || (result >= 9 && result <= 14) {
             unsafe {std::mem::transmute(result)}
         }else {
             panic!()
@@ -303,13 +306,13 @@ impl BitAnd<Square> for Bitboard {
 impl BitOr<Square> for Bitboard {
     type Output = Bitboard;
     fn bitor(self, rhs: Square) -> Bitboard {
-        self & rhs.bb()
+        self | rhs.bb()
     }
 }
 impl BitXor<Square> for Bitboard {
     type Output = Bitboard;
     fn bitxor(self, rhs: Square) -> Bitboard {
-        self & rhs.bb()
+        self ^ rhs.bb()
     }
 }
 impl BitOrAssign<Square> for Bitboard {
@@ -578,11 +581,14 @@ impl Move {
 
     pub const fn type_of(&self) -> MoveType {
         let result = (3 << 14) & self.data;
+        let promotion = 1 << 14;
+        let enPassant = 2 << 14;
+        let castling = 3 << 14;
         match result {
             0 => MoveType::Normal,
-            1 => MoveType::Promotion,
-            2 => MoveType::EnPassant,
-            3 => MoveType::Castling,
+            promotion => MoveType::Promotion,
+            enpassant => MoveType::EnPassant,
+            castling => MoveType::Castling,
             _ => panic!()
         }
     }
@@ -620,5 +626,109 @@ impl Move {
 
     pub const fn is_ok(&self) -> bool {
         self.data != Self::none().data && self.data != Self::null().data
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_square_add_direction() {
+        assert_eq!(Square::SqA1 + Direction::North, Square::SqA2);
+        //Recheck this to see if that is defined behavior
+        // assert_eq!(Square::SqH1 + Direction::NorthEast, Square::SqNone);
+    }
+
+    #[test]
+    fn test_square_sub_direction() {
+        assert_eq!(Square::SqA2 - Direction::North, Square::SqA1);
+        assert_eq!(Square::SqA1 - Direction::South, Square::SqA2);
+    }
+
+    #[test]
+    fn test_square_add_assign_direction() {
+        let mut square = Square::SqA1;
+        square += Direction::North;
+        assert_eq!(square, Square::SqA2);
+    }
+
+    #[test]
+    fn test_square_sub_assign_direction() {
+        let mut square = Square::SqA2;
+        square -= Direction::North;
+        assert_eq!(square, Square::SqA1);
+    }
+
+    #[test]
+    fn test_direction_add_direction() {
+        assert_eq!(Direction::North + Direction::East, Direction::NorthEast);
+        assert_eq!(Direction::South + Direction::West, Direction::SouthWest);
+    }
+
+    #[test]
+    fn test_direction_sub_direction() {
+        assert_eq!(Direction::North - Direction::East, Direction::NorthWest);
+        assert_eq!(Direction::South - Direction::West, Direction::SouthEast);
+    }
+
+    #[test]
+    fn test_color_not() {
+        assert_eq!(!Color::White, Color::Black);
+        assert_eq!(!Color::Black, Color::White);
+    }
+
+    #[test]
+    fn test_piece_not() {
+        assert_eq!(!Piece::WPawn, Piece::BPawn);
+        assert_eq!(!Piece::BQueen, Piece::WQueen);
+    }
+
+    #[test]
+    fn test_bitboard_operations() {
+        let bitboard: Bitboard = 0xFF;
+        assert_eq!(bitboard & Square::SqA1, 0x01);
+        assert_eq!(bitboard | Square::SqA1, 0xFF);
+        assert_eq!(bitboard ^ Square::SqA1, 0xFE);
+    }
+
+    #[test]
+    fn test_make_square() {
+        assert_eq!(make_square(File::FileA, Rank::Rank1), Square::SqA1);
+        assert_eq!(make_square(File::FileH, Rank::Rank8), Square::SqH8);
+    }
+
+    #[test]
+    fn test_make_piece() {
+        assert_eq!(make_piece(Color::White, PieceType::Queen), Piece::WQueen);
+        assert_eq!(make_piece(Color::Black, PieceType::Knight), Piece::BKnight);
+    }
+
+    #[test]
+    fn test_move_creation() {
+        let mv = Move::new(0b110110011011);
+        assert_eq!(mv.raw(), 0b110110011011);
+        assert_eq!(mv.from_sq(), Square::new_from_n(0b110110));
+        assert_eq!(mv.to_sq(), Square::new_from_n(0b011011));
+    }
+
+    #[test]
+    fn test_move_type() {
+        let mv = Move::new(11 << 14);
+        assert_eq!(mv.type_of(), MoveType::Promotion);
+    }
+
+    #[test]
+    fn test_move_promotion_type() {
+        let mv = Move::new(0x3000);
+        assert_eq!(mv.promotion_type(), PieceType::Queen);
+    }
+
+    #[test]
+    fn test_move_is_ok() {
+        let mv = Move::new(0x1234);
+        assert!(mv.is_ok());
+        assert!(!Move::null().is_ok());
+        assert!(!Move::none().is_ok());
     }
 }

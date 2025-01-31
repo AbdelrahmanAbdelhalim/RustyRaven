@@ -8,23 +8,23 @@ use std::arch::x86::_pext_u32;
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::_pext_u64;
 
-const FILEABB: Bitboard = 0x0101010101010101;
-const FILEBBB: Bitboard = FILEABB << 1;
-const FILECBB: Bitboard = FILEABB << 2;
-const FILEDBB: Bitboard = FILEABB << 3;
-const FILEEBB: Bitboard = FILEABB << 4;
-const FILEFBB: Bitboard = FILEABB << 5;
-const FILEGBB: Bitboard = FILEABB << 6;
-const FILEHBB: Bitboard = FILEABB << 7;
+pub const FILEABB: Bitboard = 0x0101010101010101;
+pub const FILEBBB: Bitboard = FILEABB << 1;
+pub const FILECBB: Bitboard = FILEABB << 2;
+pub const FILEDBB: Bitboard = FILEABB << 3;
+pub const FILEEBB: Bitboard = FILEABB << 4;
+pub const FILEFBB: Bitboard = FILEABB << 5;
+pub const FILEGBB: Bitboard = FILEABB << 6;
+pub const FILEHBB: Bitboard = FILEABB << 7;
 
-const RANK1BB: Bitboard = 0xFF;
-const RANK2BB: Bitboard = RANK1BB << (8 * 1);
-const RANK3BB: Bitboard = RANK1BB << (8 * 2);
-const RANK4BB: Bitboard = RANK1BB << (8 * 2);
-const RANK5BB: Bitboard = RANK1BB << (8 * 4);
-const RANK6BB: Bitboard = RANK1BB << (8 * 5);
-const RANK7BB: Bitboard = RANK1BB << (8 * 6);
-const RANK8BB: Bitboard = RANK1BB << (8 * 7);
+pub const RANK1BB: Bitboard = 0xFF;
+pub const RANK2BB: Bitboard = RANK1BB << (8 * 1);
+pub const RANK3BB: Bitboard = RANK1BB << (8 * 2);
+pub const RANK4BB: Bitboard = RANK1BB << (8 * 2);
+pub const RANK5BB: Bitboard = RANK1BB << (8 * 4);
+pub const RANK6BB: Bitboard = RANK1BB << (8 * 5);
+pub const RANK7BB: Bitboard = RANK1BB << (8 * 6);
+pub const RANK8BB: Bitboard = RANK1BB << (8 * 7);
 
 const SQNB: usize = Square::SquareNb as usize - 1;
 const PTNB: usize = PieceType::PieceTypeNb as usize;
@@ -123,7 +123,7 @@ fn least_significant_square_bb(bb: Bitboard) -> Bitboard {
 }
 
 fn sliding_attack(pt: &PieceType, sq: Square, occupied: Bitboard) -> Bitboard {
-    let attacks = 0;
+    let mut attacks: Bitboard = 0;
     let RookDirections = [
         Direction::North,
         Direction::South,
@@ -145,9 +145,17 @@ fn sliding_attack(pt: &PieceType, sq: Square, occupied: Bitboard) -> Bitboard {
     }
 
     for d in direction {
-        let s = sq;
+        let mut s = sq;
+        'inner: while safe_destination(sq, *d as i32) != 0 {
+            s = s + *d;
+            attacks |= s;
+            if occupied & s != 0{
+                break 'inner
+            }
+        }
     }
-    0
+    attacks
+    
 }
 
 fn safe_destination(s: Square, step: i32) -> Bitboard {
@@ -296,8 +304,8 @@ fn init_magics(pt: PieceType, table: &mut [Bitboard], magics: &mut [Magic]) {
 
     let mut occupancy: [Bitboard; 4096] = [0; 4096];
     let mut reference: [Bitboard; 4096] = [0; 4096];
-    let mut b: Bitboard = 0;
-    let mut edges: Bitboard = 0;
+    let mut b: Bitboard;
+    let mut edges: Bitboard;
     let mut epoch: [i32; 4096] = [0; 4096];
     let mut cnt: i32 = 0;
     let mut size: usize = 0;
@@ -309,7 +317,7 @@ fn init_magics(pt: PieceType, table: &mut [Bitboard], magics: &mut [Magic]) {
         let sq = Square::new_from_n(i as i32);
         edges = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
         let m: &mut Magic = &mut magics[i];
-        m.mask = sliding_attack(&pt, sq, 0);
+        m.mask = sliding_attack(&pt, sq, 0) & !edges;
 
         if IS64BIT {
             m.shift = 64 - m.mask.count_ones() as usize;
