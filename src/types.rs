@@ -41,6 +41,7 @@ pub enum Color {
 }
 
 #[repr(u8)]
+#[derive(Debug, PartialEq)]
 pub enum CastlingRights {
 
     NoCastling = 0,
@@ -100,7 +101,7 @@ pub enum Direction {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum File {
     FileA = 0,
     FileB,
@@ -113,7 +114,7 @@ pub enum File {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Rank {
     Rank1 = 0,
     Rank2,
@@ -242,6 +243,8 @@ impl AddAssign<Direction> for Square {
         let result = *self + rhs;
         if result as i32 >= Square::SqA1 as i32 && result as i32 <= Square::SqH8 as i32 {
             *self = *self + rhs;
+        }else {
+            *self = Square::SqNone;
         }
     }
 }
@@ -249,7 +252,6 @@ impl AddAssign<Direction> for Square {
 //Overloading -= between square and direction
 impl SubAssign<Direction> for Square {
     fn sub_assign(&mut self, rhs: Direction) {
-       let result = *self - rhs;
             *self = *self - rhs;
         }
     }
@@ -498,7 +500,7 @@ const fn make_black_piece(pt: PieceType) -> Piece {
 
 
 const fn is_valid_move_type(data: u16) -> bool {
-    data == 0 || data == 1 << 14 || data == 2 << 14 || data == 3 << 14
+    data == 0 || data == (1 << 14) || data == (2 << 14) || data == (3 << 14)
 }
 
 //Check if the i32 value falls within fhe file values
@@ -539,15 +541,9 @@ const fn relative_rank(color: Color, rank: Rank) -> Rank {
 // 14-15 special move flag: promotion(1), en_passant(2), castling(3)
 // en_passant bit is only set if a pawn can be captured
 // Special cases are move::none() and move::null()
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct Move {
     data: u16,
-}
-
-impl PartialEq for Move {
-    fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
-    }
 }
 
 impl Move {
@@ -730,5 +726,286 @@ mod tests {
         assert!(mv.is_ok());
         assert!(!Move::null().is_ok());
         assert!(!Move::none().is_ok());
+    }
+    #[test]
+    fn test_square_flip_rank() {
+        assert_eq!(Square::SqA1.flip_rank(), Square::SqA8);
+        assert_eq!(Square::SqH1.flip_rank(), Square::SqH8);
+    }
+
+    #[test]
+    fn test_square_flip_file() {
+        assert_eq!(Square::SqA1.flip_file(), Square::SqH1);
+        assert_eq!(Square::SqA8.flip_file(), Square::SqH8);
+    }
+
+    #[test]
+    fn test_square_file_of() {
+        assert_eq!(Square::SqA1.file_of(), File::FileA);
+        assert_eq!(Square::SqH8.file_of(), File::FileH);
+    }
+
+    #[test]
+    fn test_square_rank_of() {
+        assert_eq!(Square::SqA1.rank_of(), Rank::Rank1);
+        assert_eq!(Square::SqH8.rank_of(), Rank::Rank8);
+    }
+
+    #[test]
+    fn test_square_relative_rank() {
+        assert_eq!(Square::SqA1.relative_rank(Color::White), Rank::Rank1);
+        assert_eq!(Square::SqA1.relative_rank(Color::Black), Rank::Rank8);
+    }
+
+    #[test]
+    fn test_square_bb() {
+        assert_eq!(Square::SqA1.bb(), 1);
+        assert_eq!(Square::SqH8.bb(), 1 << 63);
+    }
+
+    #[test]
+    fn test_square_rank_bb() {
+        assert_eq!(Square::SqA1.rank_bb(), 0xFF);
+        assert_eq!(Square::SqA8.rank_bb(), 0xFF << 56);
+    }
+
+    #[test]
+    fn test_square_file_bb() {
+        assert_eq!(Square::SqA1.file_bb(), 0x0101010101010101);
+        assert_eq!(Square::SqH1.file_bb(), 0x8080808080808080);
+    }
+
+    #[test]
+    fn test_square_rank_distance_from() {
+        assert_eq!(Square::SqA1.rank_distance_from(Square::SqA2), 1);
+        assert_eq!(Square::SqA1.rank_distance_from(Square::SqA8), 7);
+    }
+
+    #[test]
+    fn test_square_file_distance_from() {
+        assert_eq!(Square::SqA1.file_distance_from(Square::SqB1), 1);
+        assert_eq!(Square::SqA1.file_distance_from(Square::SqH1), 7);
+    }
+
+    #[test]
+    fn test_castling_rights_bitand_color() {
+        assert_eq!(CastlingRights::AnyCastling & Color::White, CastlingRights::WhiteCastling);
+        assert_eq!(CastlingRights::AnyCastling & Color::Black, CastlingRights::BlackCastling);
+    }
+
+    #[test]
+    fn test_color_bitand_castling_rights() {
+        assert_eq!(Color::White & CastlingRights::AnyCastling, CastlingRights::WhiteCastling);
+        assert_eq!(Color::Black & CastlingRights::AnyCastling, CastlingRights::BlackCastling);
+    }
+
+    #[test]
+    fn test_mate_in() {
+        assert_eq!(mate_in(1), VALUE_MATE - 1);
+        assert_eq!(mate_in(MAX_PLY), VALUE_MATE - MAX_PLY);
+    }
+
+    #[test]
+    fn test_mated_in() {
+        assert_eq!(mated_in(1), -VALUE_MATE + 1);
+        assert_eq!(mated_in(MAX_PLY), -VALUE_MATE + MAX_PLY);
+    }
+
+    #[test]
+    fn test_make_key() {
+        assert_eq!(make_key(0), 1442695040888963407);
+        assert_eq!(make_key(1), 7806831264735756412);
+    }
+
+    #[test]
+    fn test_pawn_push() {
+        assert_eq!(pawn_push(Color::White), Direction::North);
+        assert_eq!(pawn_push(Color::Black), Direction::South);
+    }
+
+    #[test]
+    fn test_piece_type_of() {
+        assert_eq!(Piece::WPawn.type_of(), PieceType::Pawn);
+        assert_eq!(Piece::WQueen.type_of(), PieceType::Queen);
+        assert_eq!(Piece::BKing.type_of(), PieceType::King);
+    }
+
+    #[test]
+    fn test_piece_color() {
+        assert_eq!(Piece::WPawn.color(), Color::White);
+        assert_eq!(Piece::BQueen.color(), Color::Black);
+    }
+
+    #[test]
+    fn test_square_new_from_n() {
+        assert_eq!(Square::new_from_n(0), Square::SqA1);
+        assert_eq!(Square::new_from_n(63), Square::SqH8);
+        assert_eq!(Square::new_from_n(64), Square::SqNone);
+    }
+
+    #[test]
+    fn test_square_is_square_valid() {
+        assert!(Square::is_square_valid(0));
+        assert!(Square::is_square_valid(63));
+        assert!(!Square::is_square_valid(64));
+    }
+
+    #[test]
+    fn test_is_valid_move_type() {
+        assert!(is_valid_move_type(0));
+        assert!(is_valid_move_type(1 << 14));
+        assert!(is_valid_move_type(2 << 14));
+        assert!(is_valid_move_type(3 << 14));
+        assert!(!is_valid_move_type(4 << 9));
+    }
+
+    #[test]
+    fn test_is_file_valid() {
+        assert!(is_file_valid(File::FileA as i32));
+        assert!(is_file_valid(File::FileH as i32));
+        assert!(!is_file_valid(File::FileH as i32 + 1));
+    }
+
+    #[test]
+    fn test_is_rank_valid() {
+        assert!(is_rank_valid(Rank::Rank1 as i32));
+        assert!(is_rank_valid(Rank::Rank8 as i32));
+        assert!(!is_rank_valid(Rank::Rank8 as i32 + 1));
+    }
+
+    #[test]
+    fn test_make_white_piece() {
+        assert_eq!(make_white_piece(PieceType::Pawn), Piece::WPawn);
+        assert_eq!(make_white_piece(PieceType::Knight), Piece::WKnight);
+    }
+
+    #[test]
+    fn test_make_black_piece() {
+        assert_eq!(make_black_piece(PieceType::Pawn), Piece::BPawn);
+        assert_eq!(make_black_piece(PieceType::Knight), Piece::BKnight);
+    }
+    #[test]
+    fn test_square_add_direction_overflow() {
+        assert_eq!(Square::SqH8 + Direction::North, Square::SqNone);
+        assert_eq!(Square::SqA1 + Direction::South, Square::SqNone);
+    }
+
+    #[test]
+    fn test_square_sub_direction_underflow() {
+        assert_eq!(Square::SqA1 - Direction::North, Square::SqNone);
+        assert_eq!(Square::SqH8 - Direction::South, Square::SqNone);
+    }
+
+    #[test]
+    fn test_square_add_assign_direction_overflow() {
+        let mut square = Square::SqH8;
+        square += Direction::North;
+        assert_eq!(square, Square::SqNone);
+    }
+
+    #[test]
+    fn test_square_sub_assign_direction_underflow() {
+        let mut square = Square::SqA1;
+        square -= Direction::North;
+        assert_eq!(square, Square::SqNone);
+    }
+
+    #[test]
+    fn test_piece_type_values() {
+        assert_eq!(PieceType::Pawn as i32, 1);
+        assert_eq!(PieceType::Knight as i32, 2);
+        assert_eq!(PieceType::Bishop as i32, 3);
+        assert_eq!(PieceType::Rook as i32, 4);
+        assert_eq!(PieceType::Queen as i32, 5);
+        assert_eq!(PieceType::King as i32, 6);
+    }
+
+    #[test]
+    fn test_piece_values() {
+        assert_eq!(Piece::WPawn as i32, 1);
+        assert_eq!(Piece::WKnight as i32, 2);
+        assert_eq!(Piece::WBishop as i32, 3);
+        assert_eq!(Piece::WRook as i32, 4);
+        assert_eq!(Piece::WQueen as i32, 5);
+        assert_eq!(Piece::WKing as i32, 6);
+        assert_eq!(Piece::BPawn as i32, 9);
+        assert_eq!(Piece::BKnight as i32, 10);
+        assert_eq!(Piece::BBishop as i32, 11);
+        assert_eq!(Piece::BRook as i32, 12);
+        assert_eq!(Piece::BQueen as i32, 13);
+        assert_eq!(Piece::BKing as i32, 14);
+    }
+
+    #[test]
+    fn test_direction_values() {
+        assert_eq!(Direction::North as i32, 8);
+        assert_eq!(Direction::East as i32, 1);
+        assert_eq!(Direction::South as i32, -8);
+        assert_eq!(Direction::West as i32, -1);
+        assert_eq!(Direction::NorthWest as i32, 7);
+        assert_eq!(Direction::NorthEast as i32, 9);
+        assert_eq!(Direction::SouthEast as i32, -7);
+        assert_eq!(Direction::SouthWest as i32, -9);
+    }
+
+    #[test]
+    fn test_file_values() {
+        assert_eq!(File::FileA as i32, 0);
+        assert_eq!(File::FileB as i32, 1);
+        assert_eq!(File::FileC as i32, 2);
+        assert_eq!(File::FileD as i32, 3);
+        assert_eq!(File::FileE as i32, 4);
+        assert_eq!(File::FileF as i32, 5);
+        assert_eq!(File::FileG as i32, 6);
+        assert_eq!(File::FileH as i32, 7);
+    }
+
+    #[test]
+    fn test_rank_values() {
+        assert_eq!(Rank::Rank1 as i32, 0);
+        assert_eq!(Rank::Rank2 as i32, 1);
+        assert_eq!(Rank::Rank3 as i32, 2);
+        assert_eq!(Rank::Rank4 as i32, 3);
+        assert_eq!(Rank::Rank5 as i32, 4);
+        assert_eq!(Rank::Rank6 as i32, 5);
+        assert_eq!(Rank::Rank7 as i32, 6);
+        assert_eq!(Rank::Rank8 as i32, 7);
+    }
+
+    #[test]
+    fn test_square_values() {
+        assert_eq!(Square::SqA1 as i32, 0);
+        assert_eq!(Square::SqH8 as i32, 63);
+        assert_eq!(Square::SqNone as i32, 64);
+    }
+
+    #[test]
+    fn test_move_type_values() {
+        assert_eq!(MoveType::Normal as i32, 0);
+        assert_eq!(MoveType::Promotion as i32, 1 << 14);
+        assert_eq!(MoveType::EnPassant as i32, 2 << 14);
+        assert_eq!(MoveType::Castling as i32, 3 << 14);
+    }
+
+    #[test]
+    fn test_castling_rights_values() {
+        assert_eq!(CastlingRights::NoCastling as i32, 0);
+        assert_eq!(CastlingRights::WhiteOO as i32, 1);
+        assert_eq!(CastlingRights::WhiteOOO as i32, 2);
+        assert_eq!(CastlingRights::BlackOO as i32, 4);
+        assert_eq!(CastlingRights::BlackOOO as i32, 8);
+        assert_eq!(CastlingRights::KingSide as i32, 5);
+        assert_eq!(CastlingRights::QueenSide as i32, 10);
+        assert_eq!(CastlingRights::WhiteCastling as i32, 3);
+        assert_eq!(CastlingRights::BlackCastling as i32, 12);
+        assert_eq!(CastlingRights::AnyCastling as i32, 15);
+    }
+
+    #[test]
+    fn test_bound_values() {
+        assert_eq!(Bound::BoundNone as i32, 0);
+        assert_eq!(Bound::BoundUpper as i32, 1);
+        assert_eq!(Bound::BoundLower as i32, 2);
+        assert_eq!(Bound::BoundExact as i32, 3);
     }
 }
