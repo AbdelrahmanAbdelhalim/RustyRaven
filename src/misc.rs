@@ -14,8 +14,9 @@ impl Prng {
         self.s ^= self.s >> 12;
         self.s ^= self.s << 25;
         self.s ^= self.s >> 27;
-        self.s * 2685821657736338717
+        self.s.wrapping_mul(2685821657736338717)
     }
+
 
     pub fn rand<T: From<u64>>(&mut self) -> T {
         T::from(self.rand64())

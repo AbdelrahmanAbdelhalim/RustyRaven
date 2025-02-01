@@ -41,17 +41,18 @@ pub static PAWN_ATTACKS: OnceLock<[[Bitboard; SQNB]; COLORNB]> = OnceLock::new()
 pub static ROOK_MAGICS: OnceLock<[Magic; SQNB]> = OnceLock::new();
 pub static BISHOP_MAGICS: OnceLock<[Magic; SQNB]> = OnceLock::new();
 
-static ROOK_TABLE: OnceLock<[Bitboard; 0x19000]> = OnceLock::new();
-static BISHOP_TABLE: OnceLock<[Bitboard; 0x1480]> = OnceLock::new();
+static ROOK_TABLE: OnceLock<Vec<Bitboard>> = OnceLock::new();
+static BISHOP_TABLE: OnceLock<Vec<Bitboard>> = OnceLock::new();
 
 const fn more_than_one(bb: Bitboard) -> bool {
-    bb & bb - 1 == 0 // Resets the highest bit
+    bb & (bb - 1) != 0 // Resets the highest bit
 }
 
 fn distance(x: Square, y: Square) -> u8 {
     let sqdt = SQUARE_DISTANCE.get().unwrap();
     sqdt[x as usize][y as usize]
 }
+
 const fn shift(b: Bitboard, d: Direction) -> Bitboard {
     match d {
         Direction::North => b << 8,
@@ -82,17 +83,18 @@ const fn pawn_attacks_bb(bb: Bitboard, c: Color) -> Bitboard {
 }
 
 fn attacks_bb(pt: PieceType, s: Square, occupied: Bitboard) -> Bitboard {
-    let pseudo_attacks = PSEUDO_ATTACKS.get().unwrap();
+    // let pseudo_attacks = PSEUDO_ATTACKS.get().unwrap();
     match pt {
         PieceType::Bishop => bishop_attacks_bb(s, occupied),
         PieceType::Rook => rook_attacks_bb(s, occupied),
         PieceType::Queen => bishop_attacks_bb(s, occupied) | rook_attacks_bb(s, occupied),
-        _ => pseudo_attacks[pt as usize][s as usize],
+        // _ => pseudo_attacks[pt as usize][s as usize],
+        _ => panic!(),
     }
 }
 
 #[inline]
-fn bishop_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
+pub fn bishop_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
     let bishop_table = BISHOP_TABLE.get().unwrap();
     let bishop_magics = BISHOP_MAGICS.get().unwrap();
     let idx = bishop_magics[s as usize].index(occupied) + bishop_magics[s as usize].base;
@@ -100,10 +102,10 @@ fn bishop_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
 }
 
 #[inline]
-fn rook_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
+pub fn rook_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
     let rook_table = ROOK_TABLE.get().unwrap();
     let rook_magics = ROOK_MAGICS.get().unwrap();
-    let idx = rook_magics[s as usize].index(occupied) + rook_magics[s as usize].base;
+    let idx = rook_magics[s as usize].index(occupied);
     rook_table[idx]
 }
 
@@ -146,7 +148,7 @@ fn sliding_attack(pt: &PieceType, sq: Square, occupied: Bitboard) -> Bitboard {
 
     for d in direction {
         let mut s = sq;
-        'inner: while safe_destination(sq, *d as i32) != 0 {
+        'inner: while safe_destination(s, *d as i32) != 0 {
             s = s + *d;
             attacks |= s;
             if occupied & s != 0{
@@ -171,12 +173,12 @@ fn safe_destination(s: Square, step: i32) -> Bitboard {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 struct Magic {
     mask: Bitboard,
     magic: Bitboard,
     base: usize,
     shift: usize,
-    lastidx: usize,
 }
 
 impl Magic {
@@ -186,12 +188,11 @@ impl Magic {
             magic: 0,
             base: 0,
             shift: 0,
-            lastidx: 0,
         }
     }
     pub fn index(&self, occupied: Bitboard) -> usize {
         if IS64BIT {
-            return (((occupied & self.mask) * self.magic) >> self.shift) as usize;
+            return (((occupied & self.mask).wrapping_mul(self.magic)) >> self.shift) as usize + self.base; //Not sure if it should be a wrapping mult
         }
         let lo = (occupied as usize & self.mask as usize) as usize;
         let hi = (occupied >> 32 as usize & self.mask >> 32) as usize;
@@ -199,49 +200,129 @@ impl Magic {
     }
 }
 
-// pub static LINE_BB: OnceLock<[[u8; SQNB]; SQNB]> = OnceLock::new();
-// pub static BETWEEN_BB: OnceLock<[[u8; SQNB]; SQNB]> = OnceLock::new();
-// pub static PSEUDO_ATTACKS: OnceLock<[[u8; SQNB]; PTNB]> = OnceLock::new();
-// pub static PAWN_ATTACKS: OnceLock<[[u8; SQNB]; COLORNB]> = OnceLock::new();
 pub fn init() {
-    POPCNT.get_or_init(|| init_popcnt());
-    SQUARE_DISTANCE.get_or_init(|| init_square_distance());
-
-    let mut line_bb: [[Bitboard; SQNB]; SQNB] = [[0; SQNB]; SQNB];
-    let mut between_bb: [[Bitboard; SQNB]; SQNB] = [[0; SQNB]; SQNB];
-    let mut pseudo_attacks: [[Bitboard; SQNB]; PTNB] = [[0; SQNB]; PTNB];
-    let mut pawn_attacks: [[Bitboard; SQNB]; COLORNB] = [[0; SQNB]; COLORNB];
-
-    let mut rook_magics: [Magic; SQNB] = std::array::from_fn(|_| Magic::default());
-    let mut bishop_magics: [Magic; SQNB] = std::array::from_fn(|_| Magic::default());
-    let mut rook_table: [Bitboard; 0x19000] = [0; 0x19000];
-    let mut bishop_table: [Bitboard; 0x1480] = [0; 0x1480];
+    init_square_distance();
+    init_popcnt();
+    let mut rook_magics: [Magic; SQNB] = [Magic::default(); SQNB];
+    let mut bishop_magics: [Magic; SQNB] = [Magic::default(); SQNB];
+    let mut rook_table: Vec<Bitboard> = vec![0; 0x19000];
+    let mut bishop_table: Vec<Bitboard> = vec![0; 0x1480];
     init_magics(PieceType::Rook, &mut rook_table, &mut rook_magics);
     init_magics(PieceType::Bishop, &mut bishop_table, &mut bishop_magics);
+    
+
     ROOK_TABLE.get_or_init(|| rook_table);
     BISHOP_TABLE.get_or_init(|| bishop_table);
     ROOK_MAGICS.get_or_init(|| rook_magics);
     BISHOP_MAGICS.get_or_init(|| bishop_magics);
-
-    init_other_tables(
-        &mut line_bb,
-        &mut between_bb,
-        &mut pseudo_attacks,
-        &mut pawn_attacks,
-    );
-
-    LINE_BB.get_or_init(|| line_bb);
-    BETWEEN_BB.get_or_init(|| between_bb);
-    PSEUDO_ATTACKS.get_or_init(|| pseudo_attacks);
-    PAWN_ATTACKS.get_or_init(|| pawn_attacks);
+    init_other_tables();
 }
 
-fn init_other_tables(
-    line_bb: &mut [[Bitboard; SQNB]; SQNB],
-    between_bb: &mut [[Bitboard; SQNB]; SQNB],
-    pseudo_attacks: &mut [[Bitboard; SQNB]; PTNB],
-    pawn_attacks: &mut [[Bitboard; SQNB]; COLORNB],
-) {
+
+
+fn init_popcnt() {
+    let arr = std::array::from_fn(|x| x.count_ones() as u8);
+    POPCNT.get_or_init(|| arr);
+}
+
+fn init_square_distance(){
+    let mut sqdist: [[u8; SQNB]; SQNB] = [[0; SQNB]; SQNB];
+    for i in Square::SqA1 as usize..Square::SqH8 as usize {
+        for j in Square::SqA1 as usize..Square::SqH8 as usize {
+            let s1 = Square::new_from_n(i as i32);
+            let s2 = Square::new_from_n(j as i32);
+            sqdist[i][j] = max(
+                s1.rank_distance_from(s2) as u8,
+                s1.file_distance_from(s2) as u8,
+            );
+        }
+    }
+    SQUARE_DISTANCE.get_or_init(|| sqdist);
+}
+
+fn init_magics(pt: PieceType, table: &mut Vec<Bitboard>, magics: &mut [Magic; SQNB]) {
+    let seeds = [
+        [8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020],
+        [728, 10316, 55013, 32803, 12281, 15100, 16645, 255],
+    ];
+
+    let mut occupancy: [Bitboard; 4096] = [0; 4096];
+    let mut reference: [Bitboard; 4096] = [0; 4096];
+    let mut b: Bitboard;
+    let mut edges: Bitboard;
+    let mut epoch: [i32; 4096] = [0; 4096];
+    let mut cnt: i32 = 0;
+    let mut size: usize = 0;
+    let mut prev_base = 0;
+
+
+    let a = Square::SqA1 as usize;
+    let c = Square::SqH8 as usize;
+    for i in a..=c {
+        let sq = Square::new_from_n(i as i32);
+        edges = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
+        let m: &mut Magic = &mut magics[i];
+        m.mask = sliding_attack(&pt, sq, 0) & !edges;
+
+        if IS64BIT {
+            m.shift = 64 - m.mask.count_ones() as usize;
+        } else {
+            m.shift = 32 - m.mask.count_ones() as usize;
+        }
+
+        if sq == Square::SqA1 {
+            m.base = 0;
+        } else {
+            m.base = prev_base;
+        }
+
+        b = 0;
+        size = 0;
+        'carry: loop {
+            occupancy[size] = b;
+            reference[size] = sliding_attack(&pt, sq, b);
+            size += 1;
+            b = (b.wrapping_sub(m.mask)) & m.mask;
+            // println!("{}", pretty(b));
+            if b == 0 {
+                break 'carry;
+            }
+        }
+        let seed = seeds[IS64BIT as usize][sq.rank_of() as usize];
+        let mut rng = Prng::new(seed);
+
+        let mut k = 0;
+        cnt += 1;
+        while k < size {
+            m.magic = 0;
+            while ((m.magic.wrapping_mul(m.mask)) >> 56).count_ones() < 6 {
+                m.magic = rng.sparse_rand::<Bitboard>();
+            }
+
+            cnt += 1;
+            k = 0;
+            'inner: while k < size {
+                let idx = m.index(occupancy[k]) - m.base;
+                if epoch[idx] < cnt {
+                    epoch[idx] = cnt;
+                    table[m.base + idx] = reference[k];
+                } else if table[m.base + idx] != reference[k] {
+                    break 'inner;
+                }
+
+                k += 1;
+            }
+            k += 1;
+        }
+        prev_base += size;
+    }
+}
+
+fn init_other_tables() {
+    let mut line_bb: [[Bitboard; SQNB]; SQNB] = [[0; SQNB]; SQNB];
+    let mut between_bb: [[Bitboard; SQNB]; SQNB] = [[0; SQNB]; SQNB];
+    let mut pseudo_attacks: [[Bitboard; SQNB]; PTNB] = [[0; SQNB]; PTNB];
+    let mut pawn_attacks: [[Bitboard; SQNB]; COLORNB] = [[0; SQNB]; COLORNB];
     let a = Square::SqA1 as usize;
     let b = Square::SqH8 as usize;
 
@@ -275,100 +356,81 @@ fn init_other_tables(
             }
         }
     }
+    LINE_BB.get_or_init(|| line_bb);
+    BETWEEN_BB.get_or_init(|| between_bb);
+    PSEUDO_ATTACKS.get_or_init(|| pseudo_attacks);
+    PAWN_ATTACKS.get_or_init(|| pawn_attacks);
 }
 
-fn init_popcnt() -> [u8; 1 << 16] {
-    std::array::from_fn(|x| x.count_ones() as u8)
-}
+//Useful Debugging Function
+pub fn pretty(b: Bitboard) -> String {
+    let mut s = String::from("+---+---+---+---+---+---+---+---+\n");
 
-fn init_square_distance() -> [[u8; SQNB]; SQNB] {
-    let mut sqdist: [[u8; SQNB]; SQNB] = [[0; SQNB]; SQNB];
-    for i in Square::SqA1 as usize..Square::SqH8 as usize {
-        for j in Square::SqA1 as usize..Square::SqH8 as usize {
-            let s1 = Square::new_from_n(i as i32);
-            let s2 = Square::new_from_n(j as i32);
-            sqdist[i][j] = max(
-                s1.rank_distance_from(s2) as u8,
-                s1.file_distance_from(s2) as u8,
-            );
+    for r in (0..8).rev() {
+        for f in 0..8 {
+            if b & make_square(f, r) != 0 {
+                s.push_str("| X ");
+            } else {
+                s.push_str("|   ");
+            }
         }
+        s.push_str(&format!("| {}\n+---+---+---+---+---+---+---+---+\n", r + 1));
     }
-    sqdist
+    s.push_str("  a   b   c   d   e   f   g   h\n");
+
+    s
 }
 
-fn init_magics(pt: PieceType, table: &mut [Bitboard], magics: &mut [Magic]) {
-    let seeds = [
-        [8977, 44560, 54343, 38998, 5731, 95205, 104912, 17020],
-        [728, 10316, 55013, 32803, 12281, 15100, 16645, 255],
-    ];
+// Helper function to create the square for a given file and rank
+fn make_square(f: usize, r: usize) -> Bitboard {
+    1 << (r * 8 + f)
+}
 
-    let mut occupancy: [Bitboard; 4096] = [0; 4096];
-    let mut reference: [Bitboard; 4096] = [0; 4096];
-    let mut b: Bitboard;
-    let mut edges: Bitboard;
-    let mut epoch: [i32; 4096] = [0; 4096];
-    let mut cnt: i32 = 0;
-    let mut size: usize = 0;
-    let mut prev_base = 0;
-    let a = Square::SqA1 as usize;
-    let c = Square::SqH8 as usize;
+#[cfg(test)]
+mod test {
+    use super::*;
 
-    for i in a..=c {
-        let sq = Square::new_from_n(i as i32);
-        edges = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
-        let m: &mut Magic = &mut magics[i];
-        m.mask = sliding_attack(&pt, sq, 0) & !edges;
+    #[test]
+    fn test_init_bitboards() {
+        init();
+        let rook_magics = ROOK_MAGICS.get().unwrap();
+        let rook_table = ROOK_TABLE.get().unwrap();
+        let res = attacks_bb(PieceType::Rook, Square::SqE4, 0xFFFFFFFF00FFFFFF);
+        let res1 = sliding_attack(&PieceType::Rook, Square::SqE4, 0xFFFFFFFF00FFFFFF);
+        let mask = rook_magics[Square::SqE4 as usize].mask;
+        let shift = rook_magics[Square::SqE4 as usize].shift;
+        let magic = rook_magics[Square::SqE4 as usize].magic;
+        println!("{}", pretty(res));
+        println!("{}", pretty(res1));
+        println!("{}", pretty(0xFFFFFFFF00FFFFFF));
+        println!("{}", shift);
+        println!("{}", magic);
+    }
 
-        if IS64BIT {
-            m.shift = 64 - m.mask.count_ones() as usize;
-        } else {
-            m.shift = 32 - m.mask.count_ones() as usize;
-        }
+    #[test]
+    fn test_more_than_one() {
+        assert!(!more_than_one(4));
+        assert!(!more_than_one(2));
+        assert!(!more_than_one(1));
+        assert!(more_than_one(5));
+        assert!(more_than_one(7));
+        assert!(more_than_one(9));
+    }
 
-        if sq == Square::SqA1 {
-            m.base = 0;
-            prev_base = m.base;
-        } else {
-            m.base = prev_base + size as usize;
-            prev_base = m.base;
-        }
-
-        b = 0;
-        size = 0;
-
-        'carry: loop {
-            occupancy[size] = b;
-            reference[size] = sliding_attack(&pt, sq, b);
-            size += 1;
-            b = (b - m.mask) & m.mask;
-            if b == 0 {
-                break 'carry;
-            }
-        }
-
-        let seed = seeds[IS64BIT as usize][sq.rank_of() as usize];
-        let mut rng = Prng::new(seed);
-
-        let mut k = 0;
-        while k < size {
-            m.magic = 0;
-            while ((m.magic * m.mask) >> 56).count_ones() < 6 {
-                m.magic = rng.sparse_rand::<Bitboard>();
-            }
-
-            cnt += 1;
-            let mut j = 0;
-            'inner: while j < size {
-                let idx = m.index(occupancy[i]);
-                if epoch[idx] < cnt {
-                    epoch[idx] = cnt;
-                    table[m.base + idx] = reference[j];
-                } else if table[m.base + idx] != reference[j] {
-                    break 'inner;
-                }
-
-                j += 1;
-            }
-        }
+    #[test]
+    fn test_sliding_attack() {
+        init_square_distance();
+        let a = sliding_attack(&PieceType::Rook, Square::SqE4, 0x8000000);
+        let b = sliding_attack(&PieceType::Bishop, Square::SqD4, 0x70000);
+        let c = sliding_attack(&PieceType::Rook, Square::SqH8, 0);
+        let d = sliding_attack(&PieceType::Bishop, Square::SqA1, 0);
+        let e = sliding_attack(&PieceType::Bishop, Square::SqE4, 0);
+        let f = sliding_attack(&PieceType::Rook, Square::SqE4, 0);
+        // println!("{}", pretty(a));
+        // println!("{}", pretty(b));
+        // println!("{}", pretty(c));
+        // println!("{}", pretty(d));
+        // println!("{}", pretty(e)); //Output incorrect, square H8 is active when it shouldn't
+        // println!("{}", pretty(f)); //Output incorrect, square H8 is active when it shouldn't
     }
 }

@@ -404,14 +404,12 @@ impl Square {
         FILEABB << self.file_of() as i32
     }
 
-    #[inline]
     pub const fn rank_distance_from(&self, s: Square) -> i32 {
         let result = self.rank_of() as i32 - s.rank_of() as i32;
         let r = result.abs();
         r
     }
 
-    #[inline]
     pub const fn file_distance_from(&self, s: Square) -> i32 {
         let result = self.file_of() as i32 - s.file_of() as i32;
         let r = result.abs();
