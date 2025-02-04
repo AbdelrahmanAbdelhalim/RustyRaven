@@ -97,7 +97,7 @@ fn attacks_bb(pt: PieceType, s: Square, occupied: Bitboard) -> Bitboard {
 pub fn bishop_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
     let bishop_table = BISHOP_TABLE.get().unwrap();
     let bishop_magics = BISHOP_MAGICS.get().unwrap();
-    let idx = bishop_magics[s as usize].index(occupied) + bishop_magics[s as usize].base;
+    let idx = bishop_magics[s as usize].index(occupied);
     bishop_table[idx]
 }
 
@@ -217,7 +217,7 @@ pub fn init() {
 }
 
 fn init_popcnt() {
-    let arr = std::array::from_fn(|x| x.count_ones() as u8);
+    let arr: [u8; 1<<16]= std::array::from_fn(|x| x.count_ones() as u8);
     POPCNT.get_or_init(|| arr);
 }
 
@@ -406,20 +406,6 @@ mod test {
         println!("{}", total);
     }
 
-    #[test]
-    fn test_magic_bbs_for_rooks() {
-        init();
-        let a = Square::SqA1 as usize;
-        let b = Square::SqH8 as usize;
-
-        // Test the magic with empty occupancies
-        for i in a..=b {
-            let sq = Square::new_from_n(i as i32);
-            let magic: Bitboard = attacks_bb(PieceType::Rook, sq, 0);
-            let manual: Bitboard = sliding_attack(&PieceType::Rook, sq, 0);
-            assert_eq!(magic, manual);
-        }
-    }
 
     // Relies on correctness of sliding_attack function
     #[test]
@@ -430,29 +416,82 @@ mod test {
         for i in a..=b {
             let sq = Square::new_from_n(i as i32);
             let mut blocker: Bitboard = u64::MAX;
-            'inner: loop {
+            let mut empty_tested= false;
+            while !empty_tested {
+                empty_tested = blocker == 0;
                 let block: Bitboard = blocker & !sq.bb();
                 let magic: Bitboard = attacks_bb(PieceType::Rook, sq, block);
                 let manual: Bitboard = sliding_attack(&PieceType::Rook, sq, block);
                 assert_eq!(magic, manual);
-                blocker >>= 4;
-                if blocker == 0 {
+                blocker >>= 8;
+            }
+        }
+    }
+
+    #[test]
+    fn test_bishop_magics(){
+        init();
+        let a = Square::SqA1 as usize;
+        let b = Square::SqH8 as usize;
+        for i in a..=b {
+            let sq = Square::new_from_n(i as i32);
+            let mut empty_tested = false;
+            let mut blocker: Bitboard = u64::MAX;
+            'inner: loop {
+                let block: Bitboard = blocker & !sq.bb();
+                let magic: Bitboard = attacks_bb(PieceType::Bishop, sq, block);
+                let manual: Bitboard = sliding_attack(&PieceType::Bishop, sq, block);
+                assert_eq!(magic, manual);
+                blocker >>= 8;
+                if blocker == 0 && empty_tested {
                     break 'inner
+                }else {
+                    empty_tested = true;
                 }
             }
         }
     }
 
     #[test]
-    fn test_init_bitboards() {
-        init();
-        let rook_magics = ROOK_MAGICS.get().unwrap();
-        let rook_table = ROOK_TABLE.get().unwrap();
-        let bres = attacks_bb(PieceType::Rook, Square::SqH8, 0xFFFFFF);
-        // let bres = attacks_bb(PieceType::Bishop, Square::SqH8, 0);
-        println!("{}", pretty(bres));
-        // assert_eq!(res, res1);
+    fn sandbox() {
+        init_popcnt();
+        init_square_distance();
+        let a = Square::SqA1 as usize; 
+        let b = Square::SqH8 as usize; 
+        let pt = PieceType::Bishop;
+        let mut total = 0;
+        for i in a..=b {
+            let sq = Square::new_from_n(i as i32);
+            let edges = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
+            let mut mask = sliding_attack(&pt, sq, 0) & !edges;
+            let mut b = 0;
+            'carry: loop {
+                mask = sliding_attack(&pt, sq, b);
+                total += 1;
+                b = (b.wrapping_sub(mask)) & mask;
+                if b == 0 {
+                    break 'carry;
+                }
+            }
+        }
+        println!("{}", total);
     }
+
+    #[test]
+    fn sandbox2() {
+        init_square_distance();
+        let a = Square::SqH4 as usize; 
+        let b = Square::SqH8 as usize; 
+        let mut tot = 0;
+        for i in a..=b {
+            let sq = Square::new_from_n(i as i32);
+            let res = sliding_attack(&PieceType::Bishop, sq, 0);
+            println!("{}", pretty(res)); 
+            tot += 2_i32.pow(res.count_ones());
+        }
+        println!("{}", tot);
+    }
+
     #[test]
     fn test_square_distance() {
         init_square_distance();
