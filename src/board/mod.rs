@@ -1,1 +1,2 @@
-mod bbtables;
+mod bitboard;
+mod position;

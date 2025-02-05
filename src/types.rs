@@ -33,14 +33,14 @@ const RANK1BB: Bitboard = 0xFF;
 const FILEABB: Bitboard = 0x0101010101010101;
 
 #[repr(i32)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Color {
     White = 0,
     Black = 1,
     ColorNb = 2,
 }
 
-#[repr(u8)]
+#[repr(i32)]
 #[derive(Debug, PartialEq)]
 pub enum CastlingRights {
 
@@ -68,7 +68,7 @@ pub enum Bound {
 }
 
 #[repr(u8)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Piece {
     NoPiece = 0,
     WPawn,
@@ -160,7 +160,7 @@ pub enum MoveType {
 }
 
 impl Piece {
-    const fn type_of(&self) -> PieceType {
+    pub const fn type_of(&self) -> PieceType {
         match self {
             Piece::WPawn => PieceType::Pawn,
             Piece::BPawn => PieceType::Pawn,
@@ -178,7 +178,7 @@ impl Piece {
         }
     }
 
-    const fn color(&self) -> Color {
+    pub const fn color(&self) -> Color {
         match self {
             Piece::WPawn => Color::White, 
             Piece::WKnight => Color::White, 
@@ -197,6 +197,7 @@ impl Piece {
             _ => panic!()
         }
     }
+
 }
 
 // Overloading Addition operator between Square and Direction
@@ -428,33 +429,40 @@ impl BitAnd<Color> for CastlingRights {
     type Output = Self;
     fn bitand(self, rhs: Color) -> CastlingRights {
         match rhs {
-            Color::White => unsafe {std::mem::transmute(CastlingRights::WhiteCastling as i8 & self as i8)},
-            Color::Black => unsafe {std::mem::transmute(CastlingRights::BlackCastling as i8 & self as i8)},
+            Color::White => unsafe {std::mem::transmute(CastlingRights::WhiteCastling as i32 & self as i32)},
+            Color::Black => unsafe {std::mem::transmute(CastlingRights::BlackCastling as i32 & self as i32)},
             _ => panic!()
         }
     }
 }
 
+impl BitAnd for CastlingRights {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        let res = self as i32 & rhs as i32;
+        unsafe{std::mem::transmute(res)}
+    }
+}
 //Overload putting CastlingRights on rhs
 impl BitAnd<CastlingRights> for Color {
     type Output = CastlingRights;
     fn bitand(self, rhs: CastlingRights) -> CastlingRights {
         match self {
-            Color::White => unsafe {std::mem::transmute(CastlingRights::WhiteCastling as i8 & rhs as i8)},
-            Color::Black => unsafe {std::mem::transmute(CastlingRights::BlackCastling as i8 & rhs as i8)},
+            Color::White => unsafe {std::mem::transmute(CastlingRights::WhiteCastling as i32 & rhs as i32)},
+            Color::Black => unsafe {std::mem::transmute(CastlingRights::BlackCastling as i32 & rhs as i32)},
             _ => panic!()
         }
     }
 }
 
-const fn mate_in(ply: i32) -> Value {
+pub const fn mate_in(ply: i32) -> Value {
     VALUE_MATE - ply
 }
-const fn mated_in(ply: i32) -> Value {
+pub const fn mated_in(ply: i32) -> Value {
     -VALUE_MATE + ply
 }
 
-const fn make_square(f: File, r: Rank) -> Square {
+pub const fn make_square(f: usize, r: usize) -> Square {
     let result = ((r as i32) << 3) + f as i32;
     if Square::is_square_valid(result){
         unsafe {std::mem::transmute(result)}
@@ -463,7 +471,7 @@ const fn make_square(f: File, r: Rank) -> Square {
     }
 }
 
-const fn make_piece(c: Color, pt: PieceType) -> Piece {
+pub const fn make_piece(c: Color, pt: PieceType) -> Piece {
     match c {
         Color::White => make_white_piece(pt),
         Color::Black => make_black_piece(pt),
@@ -471,7 +479,7 @@ const fn make_piece(c: Color, pt: PieceType) -> Piece {
     }
 }
 
-const fn make_white_piece(pt: PieceType) -> Piece {
+pub const fn make_white_piece(pt: PieceType) -> Piece {
     match pt {
         PieceType::Pawn => Piece::WPawn,
         PieceType::Knight => Piece::WKnight,
@@ -483,7 +491,7 @@ const fn make_white_piece(pt: PieceType) -> Piece {
     }
 }
 
-const fn make_black_piece(pt: PieceType) -> Piece {
+pub const fn make_black_piece(pt: PieceType) -> Piece {
     match pt {
         PieceType::Pawn => Piece::BPawn,
         PieceType::Knight => Piece::BKnight,
@@ -497,21 +505,21 @@ const fn make_black_piece(pt: PieceType) -> Piece {
 
 
 
-const fn is_valid_move_type(data: u16) -> bool {
+pub const fn is_valid_move_type(data: u16) -> bool {
     data == 0 || data == (1 << 14) || data == (2 << 14) || data == (3 << 14)
 }
 
 //Check if the i32 value falls within fhe file values
-const fn is_file_valid(s: i32) -> bool {
+pub const fn is_file_valid(s: i32) -> bool {
     s >= File::FileA as i32 && s <= File::FileH as i32
 }
 
 //Check if the rank falls within the valid rank values
-const fn is_rank_valid(s: i32) -> bool {
+pub const fn is_rank_valid(s: i32) -> bool {
     s >= Rank::Rank1 as i32 && s <= Rank::Rank8 as i32
 }
 
-const fn pawn_push(color: Color) -> Direction {
+pub const fn pawn_push(color: Color) -> Direction {
     match color {
         Color::White => Direction::North,
         Color::Black => Direction::South,
@@ -519,11 +527,11 @@ const fn pawn_push(color: Color) -> Direction {
     }
 } 
 
-const fn make_key(seed: u64) -> Key {
+pub const fn make_key(seed: u64) -> Key {
     return (seed * 6364136223846793005 + 1442695040888963407) as Key;
 }
 
-const fn relative_rank(color: Color, rank: Rank) -> Rank {
+pub const fn relative_rank(color: Color, rank: Rank) -> Rank {
     let result = (rank as i32) ^ (color as i32 * 7);
     if is_rank_valid(result){
         unsafe{std::mem::transmute(result)}
@@ -540,7 +548,7 @@ const fn relative_rank(color: Color, rank: Rank) -> Rank {
 // en_passant bit is only set if a pawn can be captured
 // Special cases are move::none() and move::null()
 #[derive(Debug, PartialEq)]
-struct Move {
+pub struct Move {
     data: u16,
 }
 
