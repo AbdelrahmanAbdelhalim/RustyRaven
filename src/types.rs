@@ -32,6 +32,17 @@ VALUE_ZERO, PAWNVALUE, KNIGHTVALUE, BISHOPVALUE, ROOKVALUE, QUEENVALUE, VALUE_ZE
 const RANK1BB: Bitboard = 0xFF;
 const FILEABB: Bitboard = 0x0101010101010101;
 
+pub const SQNB: usize = Square::SquareNb as usize - 1; //Poissibly move these constants to the types file
+pub const PNB: usize = Piece::PieceNb as usize;
+pub const PTNB: usize = PieceType::PieceTypeNb as usize;
+pub const COLORNB: usize = Color::ColorNb as usize;
+pub const CRNB: usize = CastlingRights::CastlingRightsNb as usize;
+pub const FNB: usize = 8; 
+pub const RNB: usize = 8; 
+
+pub const SQA1: usize = Square::SqA1 as usize;
+pub const SQH8: usize = Square::SqA1 as usize;
+
 #[repr(i32)]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Color {

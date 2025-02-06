@@ -26,11 +26,11 @@ pub const RANK6BB: Bitboard = RANK1BB << (8 * 5);
 pub const RANK7BB: Bitboard = RANK1BB << (8 * 6);
 pub const RANK8BB: Bitboard = RANK1BB << (8 * 7);
 
-pub const SQNB: usize = Square::SquareNb as usize - 1; //Poissibly move these constants to the types file
-pub const PNB: usize = Piece::PieceNb as usize;
-pub const PTNB: usize = PieceType::PieceTypeNb as usize;
-pub const COLORNB: usize = Color::ColorNb as usize;
-pub const CRNB: usize = CastlingRights::CastlingRightsNb as usize;
+// pub const SQNB: usize = Square::SquareNb as usize - 1; //Poissibly move these constants to the types file
+// pub const PNB: usize = Piece::PieceNb as usize;
+// pub const PTNB: usize = PieceType::PieceTypeNb as usize;
+// pub const COLORNB: usize = Color::ColorNb as usize;
+// pub const CRNB: usize = CastlingRights::CastlingRightsNb as usize;
 const IS64BIT: bool = cfg!(target_pointer_width = "64");
 
 pub static POPCNT: OnceLock<[u8; 1 << 16]> = OnceLock::new();
