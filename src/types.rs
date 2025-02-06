@@ -696,8 +696,8 @@ mod tests {
 
     #[test]
     fn test_make_square() {
-        assert_eq!(make_square(File::FileA, Rank::Rank1), Square::SqA1);
-        assert_eq!(make_square(File::FileH, Rank::Rank8), Square::SqH8);
+        assert_eq!(make_square(File::FileA as usize, Rank::Rank1 as usize), Square::SqA1);
+        assert_eq!(make_square(File::FileH as usize, Rank::Rank8 as usize), Square::SqH8);
     }
 
     #[test]
