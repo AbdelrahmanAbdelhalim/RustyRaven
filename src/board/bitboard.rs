@@ -205,6 +205,7 @@ impl Magic {
 pub fn init() {
     init_square_distance();
     init_popcnt();
+
     let mut rook_magics: [Magic; SQNB] = [Magic::default(); SQNB];
     let mut bishop_magics: [Magic; SQNB] = [Magic::default(); SQNB];
     let mut rook_table: Vec<Bitboard> = vec![0; 0x19000];
@@ -215,7 +216,8 @@ pub fn init() {
     BISHOP_TABLE.get_or_init(|| bishop_table);
     ROOK_MAGICS.get_or_init(|| rook_magics);
     BISHOP_MAGICS.get_or_init(|| bishop_magics);
-    // init_other_tables();
+
+    init_other_tables();
 }
 
 fn init_popcnt() {
@@ -259,24 +261,14 @@ fn init_magics(pt: PieceType, table: &mut Vec<Bitboard>, magics: &mut [Magic; SQ
     let c = Square::SqH8 as usize;
     for i in a..=c {
         let sq = Square::new_from_n(i as i32);
-        edges = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
         let m: &mut Magic = &mut magics[i];
+        edges = ((RANK1BB | RANK8BB) & !sq.rank_bb()) | ((FILEABB | FILEHBB) & !sq.file_bb());
         m.mask = sliding_attack(&pt, sq, 0) & !edges;
-
-        if IS64BIT {
-            m.shift = 64 - m.mask.count_ones() as usize;
-        } else {
-            m.shift = 32 - m.mask.count_ones() as usize;
-        }
-
-        if sq == Square::SqA1 {
-            m.base = 0;
-        } else {
-            m.base = prev_base;
-        }
-
+        m.shift = ((IS64BIT as usize * 32) + 32) - m.mask.count_ones() as usize;
+        m.base = (sq != Square::SqA1) as usize * prev_base;
         b = 0;
         size = 0;
+
         'carry: loop {
             occupancy[size] = b;
             reference[size] = sliding_attack(&pt, sq, b);
@@ -286,11 +278,12 @@ fn init_magics(pt: PieceType, table: &mut Vec<Bitboard>, magics: &mut [Magic; SQ
                 break 'carry;
             }
         }
+
         let seed = seeds[IS64BIT as usize][sq.rank_of() as usize];
         let mut rng = Prng::new(seed);
-
         let mut k = 0;
         cnt += 1;
+
         while k < size {
             m.magic = 0;
             while ((m.magic.wrapping_mul(m.mask)) >> 56).count_ones() < 6 {
@@ -347,7 +340,7 @@ fn init_other_tables() {
                 if pseudo_attacks[piece as usize][k] & s2.bb() != 0 {
                     line_bb[k][j] = (attacks_bb(piece, s1, 0) & attacks_bb(piece, s2, 0)) | s1 | s2;
                     between_bb[k][j] =
-                        (attacks_bb(piece, s1, s2.bb()) & attacks_bb(piece, s2, s1.bb()));
+                        attacks_bb(piece, s1, s2.bb()) & attacks_bb(piece, s2, s1.bb());
                 }
                 between_bb[k][j] |= s2
             }

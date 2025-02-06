@@ -194,10 +194,6 @@ impl<'a> fmt::Display for Position<'a> {
     }
 }
 
-struct Zobrist {
-
-}
-
 mod test {
     use super::*;
 
