@@ -1,10 +1,15 @@
+use std::fmt;
+use std::sync::OnceLock;
 use crate::types::*;
 use crate::board::bitboard as bb;
-use std::fmt;
 use crate::misc::*;
+use crate::board::zobrist;
 
 const PIECE_TYPE_NB: usize = PieceType::PieceTypeNb as usize;
 const PIECE_TO_CHAR: &str = " PNBRQK pnbrqk";
+
+pub static CUCKOO: OnceLock<[Key; 8192]> = OnceLock::new();
+pub static CUCKOO_MOVE: OnceLock<[Key; 8192]> = OnceLock::new();
 
 #[inline]
 fn H1(h: Key) -> i32 {
@@ -170,6 +175,21 @@ impl <'a> Position<'a> {
         self.board[t as usize] = pc;
     }
 
+    pub fn init() -> Self {
+        zobrist::init_zobrist();
+
+        let psq = zobrist::PSQ.get().unwrap();
+        let enpassant = zobrist::ENPASSANT.get().unwrap();
+        let castling = zobrist::CASTLING.get().unwrap();
+        let side = zobrist::SIDE.get().unwrap();
+        let no_pawns = zobrist::NOPAWNS.get().unwrap();
+
+        let mut cuckoo:[Key; 8192] = [0; 8192];
+        let mut cuckoomove: [Key; 8192] = [0; 8192];
+
+
+
+    }
     //Present in the header file, and calls the overloaded function in the .cpp file.
     // #[inline]
     // pub fn do_moe(m: Move, new_st: &StateInfo) {
