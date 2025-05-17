@@ -1,12 +1,14 @@
+use crate::board::bitboard as bb;
+use crate::board::zobrist;
+use crate::misc::*;
+use crate::types::*;
 use std::fmt;
 use std::sync::OnceLock;
-use crate::types::*;
-use crate::board::bitboard as bb;
-use crate::misc::*;
-use crate::board::zobrist;
+use std::vec::Vec;
 
 const PIECE_TYPE_NB: usize = PieceType::PieceTypeNb as usize;
 const PIECE_TO_CHAR: &str = " PNBRQK pnbrqk";
+const MAX_PLY: usize = 246; // Maximum search depth
 
 pub static CUCKOO: OnceLock<[Key; 8192]> = OnceLock::new();
 pub static CUCKOO_MOVE: OnceLock<[Key; 8192]> = OnceLock::new();
@@ -21,54 +23,113 @@ fn H2(h: Key) -> i32 {
 }
 
 #[derive(Debug, Copy, Clone)]
-struct StateInfo<'a> {
+struct StateInfo {
     //Copied when making a move
-    materialKey: Key,
-    pawnKey: Key,
-    nonPawnMaterial: [Value; COLORNB],
-    castlingRights: i32,
-    rule50: i32,
-    pliesFromNull: i32,
-    epSquare: Square,
+    material_key: Key,
+    pawn_key: Key,
+    non_pawn_material: [Value; COLORNB],
+    castling_rights: i32,
+    rule_50: i32,
+    plies_from_null: i32,
+    ep_square: Square,
 
     //Not copied when making a move
     key: Key,
-    checkersBB: Bitboard,
-    previous: &'a StateInfo<'a>,
-    blockersForKing: [Bitboard; COLORNB],
+    checkers_bb: Bitboard,
+    blockers_for_king: [Bitboard; COLORNB],
     pinners: [Bitboard; COLORNB],
-    checkSquares: [Bitboard; PIECE_TYPE_NB],
-    capturedPiece: Piece,
+    check_squares: [Bitboard; PIECE_TYPE_NB],
+    captured_piece: Piece,
     repition: i32,
 }
 
-struct Position<'a> {
-    board: [Piece; SQNB],
-    byTypeBB: [Bitboard; PTNB],
-    byColorBB: [Bitboard; COLORNB],
-    pieceCount: [i32; PNB],
-    castlingRIghtMast: [i32; SQNB],
-    castlingRookSquare: [Square; CRNB],
-    castlingPath: [Bitboard; CRNB],
-    st: &'a StateInfo<'a>,
-    gamePly: i32,
-    sideToMove: Color,
+struct StatePool {
+    states: Vec<StateInfo>,
+    current: usize,
 }
 
-impl <'a> Position<'a> {
+impl StatePool {
+    fn new() -> Self {
+        Self {
+            states: vec![StateInfo {
+                material_key: 0,
+                pawn_key: 0,
+                non_pawn_material: [0; COLORNB],
+                castling_rights: 0,
+                rule_50: 0,
+                plies_from_null: 0,
+                ep_square: Square::SqNone,
+                key: 0,
+                checkers_bb: 0,
+                blockers_for_king: [0; COLORNB],
+                pinners: [0; COLORNB],
+                check_squares: [0; PIECE_TYPE_NB],
+                captured_piece: Piece::NoPiece,
+                repition: 0,
+            }; MAX_PLY],
+            current: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn push(&mut self) -> &mut StateInfo {
+        self.current += 1;
+        &mut self.states[self.current - 1]
+    }
+
+    #[inline(always)]
+    fn pop(&mut self) {
+        self.current -= 1;
+    }
+
+    #[inline(always)]
+    fn current(&self) -> &StateInfo {
+        &self.states[self.current - 1]
+    }
+
+    #[inline(always)]
+    fn current_mut(&mut self) -> &mut StateInfo {
+        &mut self.states[self.current - 1]
+    }
+}
+
+struct Position {
+    board: [Piece; SQNB],
+    by_type_bb: [Bitboard; PTNB],
+    by_color_bb: [Bitboard; COLORNB],
+    piece_count: [i32; PNB],
+    castling_rights_mask: [i32; SQNB],
+    castling_rook_square: [Square; CRNB],
+    castling_path: [Bitboard; CRNB],
+    state_pool: StatePool,
+    game_ply: i32,
+    side_to_move: Color,
+}
+
+impl Position {
     // pub const fn default() -> Self {
-    //     // let prng = Prng::new(1070372); 
+    //     // let prng = Prng::new(1070372);
 
     // }
-    #[inline]
-    pub const fn side_to_move(&self) -> Color {
-        self.sideToMove        
+    #[inline(always)]
+    fn st(&self) -> &StateInfo {
+        self.state_pool.current()
+    }
+
+    #[inline(always)]
+    fn st_mut(&mut self) -> &mut StateInfo {
+        self.state_pool.current_mut()
     }
 
     #[inline]
-    pub const fn piece_on(&self, s: Square) -> Piece {
+    pub fn side_to_move(&self) -> Color {
+        self.side_to_move
+    }
+
+    #[inline]
+    pub fn piece_on(&self, s: Square) -> Piece {
         self.board[s as usize]
-    } 
+    }
 
     #[inline]
     pub fn empty(&self, s: Square) -> bool {
@@ -76,130 +137,155 @@ impl <'a> Position<'a> {
     }
 
     #[inline]
-    pub const fn moved_piece(&self, m: Move) -> Piece {
+    pub fn moved_piece(&self, m: Move) -> Piece {
         self.piece_on(m.from_sq())
     }
 
     #[inline]
-    pub const fn pieces_by_piecetype(&self, pt: PieceType) -> Bitboard {
-        self.byTypeBB[pt as usize]
+    pub fn pieces_by_piecetype(&self, pt: PieceType) -> Bitboard {
+        self.by_type_bb[pt as usize]
     }
 
     #[inline]
-    pub const fn ep_square(&self) -> Square {
-        self.st.epSquare
+    pub fn ep_square(&self) -> Square {
+        self.st().ep_square
     }
 
     #[inline]
-    pub const fn can_castle(&self, cr: CastlingRights) -> bool {
-        self.st.castlingRights & cr as i32 != 0
+    pub fn can_castle(&self, cr: CastlingRights) -> bool {
+        self.st().castling_rights & cr as i32 != 0
     }
 
     #[inline]
-    pub const fn cherckers(&self) -> Bitboard {
-        self.st.checkersBB
+    pub fn checkers(&self) -> Bitboard {
+        self.st().checkers_bb
     }
 
     #[inline]
-    pub const fn blockers_for_king(&self, c: Color) -> Bitboard {
-        self.st.blockersForKing[c as usize]
+    pub fn blockers_for_king(&self, c: Color) -> Bitboard {
+        self.st().blockers_for_king[c as usize]
     }
 
     #[inline]
-    pub const fn pinners(&self, c: Color) -> Bitboard {
-        self.st.pinners[c as usize]
+    pub fn pinners(&self, c: Color) -> Bitboard {
+        self.st().pinners[c as usize]
     }
 
     #[inline]
-    pub const fn check_squares(&self, pt: PieceType) -> Bitboard {
-        self.st.checkSquares[pt as usize]
+    pub fn check_squares(&self, pt: PieceType) -> Bitboard {
+        self.st().check_squares[pt as usize]
     }
 
     #[inline]
-    pub const fn pawn_key(&self) -> Key {
-        self.st.pawnKey
+    pub fn pawn_key(&self) -> Key {
+        self.st().pawn_key
     }
 
     #[inline]
-    pub const fn material_key(&self) -> Key {
-        self.st.materialKey
+    pub fn material_key(&self) -> Key {
+        self.st().material_key
     }
 
     #[inline]
-    pub const fn non_pawn_material(&self, c: Color) -> Value {
-        self.st.nonPawnMaterial[c as usize]
+    pub fn non_pawn_material(&self, c: Color) -> Value {
+        self.st().non_pawn_material[c as usize]
     }
 
     #[inline]
-    pub const fn game_ply(&self) -> i32 {
-        self.gamePly
+    pub fn game_ply(&self) -> i32 {
+        self.game_ply
     }
 
     #[inline]
-    pub const fn rule50_count(&self) -> i32 {
-        self.st.rule50
+    pub fn rule50_count(&self) -> i32 {
+        self.st().rule_50
     }
 
     #[inline]
-    pub const fn captured_piece(&self) -> Piece {
-        self.st.capturedPiece
+    pub fn captured_piece(&self) -> Piece {
+        self.st().captured_piece
     }
 
     pub fn put_piece(&mut self, pc: Piece, s: Square) {
         self.board[s as usize] = pc;
-        self.byTypeBB[(PieceType::AllPieces as i32 + 1) as usize] |= self.byTypeBB[pc.type_of() as usize];
-        self.byTypeBB[(PieceType::AllPieces as i32 + 1) as usize] |= s ;
-        self.byColorBB[pc.color() as usize] |= s;
-        self.pieceCount[pc as usize] += 1;
-        self.pieceCount[make_piece(pc.color(), PieceType::AllPieces)as usize] += 1;
+        self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] |=
+            self.by_type_bb[pc.type_of() as usize];
+        self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] |= s;
+        self.by_color_bb[pc.color() as usize] |= s;
+        self.piece_count[pc as usize] += 1;
+        self.piece_count[make_piece(pc.color(), PieceType::AllPieces) as usize] += 1;
     }
-
 
     pub fn remove_piece(&mut self, s: Square) {
         let pc = self.board[s as usize];
-        self.byTypeBB[(PieceType::AllPieces as i32 + 1) as usize] ^= s ;
-        self.byTypeBB[pc.type_of() as usize] ^= s ;
-        self.byColorBB[pc.color() as usize] ^= s;
+        self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] ^= s;
+        self.by_type_bb[pc.type_of() as usize] ^= s;
+        self.by_color_bb[pc.color() as usize] ^= s;
         self.board[s as usize] = Piece::NoPiece;
-        self.pieceCount[pc as usize] -= 1;
-        self.pieceCount[make_piece(pc.color(), PieceType::AllPieces)as usize] -= 1;
+        self.piece_count[pc as usize] -= 1;
+        self.piece_count[make_piece(pc.color(), PieceType::AllPieces) as usize] -= 1;
     }
 
     pub fn move_piece(&mut self, f: Square, t: Square) {
         let pc = self.board[f as usize];
         let from_to: Bitboard = f.bb() | t;
-        self.byTypeBB[(PieceType::AllPieces as i32 + 1) as usize] ^= from_to;
-        self.byTypeBB[pc.type_of() as usize] ^= from_to;
-        self.byTypeBB[pc.color() as usize] ^= from_to;
+        self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] ^= from_to;
+        self.by_type_bb[pc.type_of() as usize] ^= from_to;
+        self.by_type_bb[pc.color() as usize] ^= from_to;
         self.board[f as usize] = Piece::NoPiece;
         self.board[t as usize] = pc;
     }
-
-    pub fn init() -> Self {
+    //Initialize various tables used for cycle detection and zobrist hashing
+    pub fn init() {
         zobrist::init_zobrist();
-
         let psq = zobrist::PSQ.get().unwrap();
         let enpassant = zobrist::ENPASSANT.get().unwrap();
         let castling = zobrist::CASTLING.get().unwrap();
         let side = zobrist::SIDE.get().unwrap();
         let no_pawns = zobrist::NOPAWNS.get().unwrap();
 
-        let mut cuckoo:[Key; 8192] = [0; 8192];
+        let mut cuckoo: [Key; 8192] = [0; 8192];
         let mut cuckoomove: [Key; 8192] = [0; 8192];
-
-
-
+        let zpsq = zobrist::PSQ.get().unwrap();
+        let zside =  zobrist::SIDE.get().unwrap();
+        for j in 0..8192 {
+            cuckoo[j] = 0;
+            cuckoomove[j] = 0;
+        }
+        let mut count = 0;
+        for i in 0..PNB {
+            for j in SQA1..=SQH8 {
+                let s1 = Square::new_from_n(j as i32);
+                let s2 = Square::new_from_n(s1 as i32 + 1);
+                for k in s2 as usize..=SQH8 {
+                    let pc = Piece::new_from_n(i);
+                    if (pc.type_of() as usize != Piece::WPawn as usize
+                        && pc.type_of() as usize != Piece::BPawn as usize)
+                        && (bb::attacks_bb(pc.type_of(), s1, 0) & s2) != 0
+                    {
+                        let mv = Move::new_from_to_sq(s1, s2);
+                        let mut key = zpsq[i][j] ^ zpsq[i][k] ^ zside;
+                        let mut m = H1(key);
+                        'inner: loop {
+                            std::mem::swap(&mut cuckoo[m as usize], &mut key);
+                            std::mem::swap(&mut cuckoo[m as usize], &mut key);
+                            if mv == Move::none() {
+                                break 'inner
+                            }
+                            m = ((m == H1(key)) as i32 * H2(key)) + ((m != H1(key)) as i32 * H1(key));
+                        }
+                        count += 1;
+                    }
+                }
+            }
+        }
+        assert!(count == 3668);
     }
-    //Present in the header file, and calls the overloaded function in the .cpp file.
-    // #[inline]
-    // pub fn do_moe(m: Move, new_st: &StateInfo) {
-
-    // }
 }
 
-impl<'a> fmt::Display for Position<'a> {
+impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f,"\n +---+---+---+---+---+---+---+---+")?;
+        writeln!(f, "\n +---+---+---+---+---+---+---+---+")?;
         for rank in (0..8).rev() {
             for file in 0..8 {
                 let piece = self.piece_on(make_square(file, rank));
@@ -218,7 +304,5 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_position_display() {
-
-    }
+    fn test_position_display() {}
 }

@@ -209,6 +209,24 @@ impl Piece {
         }
     }
 
+    pub const fn new_from_n(i: usize) -> Self {
+        match i {
+            0 => Piece::NoPiece,
+            1 => Piece::WPawn,
+            2 => Piece::WKnight,
+            3 => Piece::WBishop,
+            4 => Piece::WRook,
+            5 => Piece::WQueen,
+            6 => Piece::WKing,
+            9 => Piece::BPawn,
+            10 => Piece::BKnight,
+            11 => Piece::BBishop,
+            12 => Piece::BRook,
+            13 => Piece::BQueen,
+            14 => Piece::BKing,
+            _ => panic!("Invalid piece index"),
+        }
+    }
 }
 
 // Overloading Addition operator between Square and Direction
@@ -570,6 +588,12 @@ impl Move {
         }
     }
 
+    pub const fn new_from_to_sq(from: Square, to: Square) -> Self {
+        let data = ((from as usize) << 6) & to as usize;
+        Move {
+            data: data as u16,
+        }
+    }
     pub const fn from_to(&self) -> u16 {
         self.data & 0xFFF
     }

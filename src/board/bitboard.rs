@@ -76,7 +76,7 @@ const fn shift_twice(b: Bitboard, d: Direction) -> Bitboard {
     }
 }
 
-const fn pawn_attacks_bb(bb: Bitboard, c: Color) -> Bitboard {
+pub const fn pawn_attacks_bb(bb: Bitboard, c: Color) -> Bitboard {
     match c {
         Color::White => shift(bb, Direction::NorthWest) | shift(bb, Direction::NorthEast),
         Color::Black => shift(bb, Direction::SouthWest) | shift(bb, Direction::SouthEast),
@@ -84,14 +84,27 @@ const fn pawn_attacks_bb(bb: Bitboard, c: Color) -> Bitboard {
     }
 }
 
-fn attacks_bb(pt: PieceType, s: Square, occupied: Bitboard) -> Bitboard {
-    // let pseudo_attacks = PSEUDO_ATTACKS.get().unwrap();
+pub fn attacks_bb(pt: PieceType, s: Square, occupied: Bitboard) -> Bitboard {
+    let pseudo_attacks = PSEUDO_ATTACKS.get().unwrap();
     match pt {
         PieceType::Bishop => bishop_attacks_bb(s, occupied),
         PieceType::Rook => rook_attacks_bb(s, occupied),
         PieceType::Queen => bishop_attacks_bb(s, occupied) | rook_attacks_bb(s, occupied),
-        // _ => pseudo_attacks[pt as usize][s as usize],
-        _ => panic!(),
+        _ => pseudo_attacks[pt as usize][s as usize],
+    }
+}
+
+pub fn attacks_bb_helper(
+    pt: PieceType,
+    s: Square,
+    occupied: Bitboard,
+    pseudo_attacks: &[[u64; 64]; 8],
+) -> Bitboard {
+    match pt {
+        PieceType::Bishop => bishop_attacks_bb(s, occupied),
+        PieceType::Rook => rook_attacks_bb(s, occupied),
+        PieceType::Queen => bishop_attacks_bb(s, occupied) | rook_attacks_bb(s, occupied),
+        _ => pseudo_attacks[pt as usize][s as usize],
     }
 }
 
@@ -128,13 +141,13 @@ fn least_significant_square_bb(bb: Bitboard) -> Bitboard {
 
 fn sliding_attack(pt: &PieceType, sq: Square, occupied: Bitboard) -> Bitboard {
     let mut attacks: Bitboard = 0;
-    let RookDirections = [
+    let rook_directions = [
         Direction::North,
         Direction::South,
         Direction::East,
         Direction::West,
     ];
-    let BishopDirections = [
+    let bishop_directions = [
         Direction::NorthEast,
         Direction::SouthEast,
         Direction::NorthWest,
@@ -143,9 +156,9 @@ fn sliding_attack(pt: &PieceType, sq: Square, occupied: Bitboard) -> Bitboard {
     let direction;
 
     if *pt == PieceType::Rook {
-        direction = &RookDirections;
+        direction = &rook_directions;
     } else {
-        direction = &BishopDirections;
+        direction = &bishop_directions;
     }
 
     for d in direction {
@@ -221,7 +234,7 @@ pub fn init() {
 }
 
 fn init_popcnt() {
-    let arr: [u8; 1<<16]= std::array::from_fn(|x| x.count_ones() as u8);
+    let arr: [u8; 1 << 16] = std::array::from_fn(|x| x.count_ones() as u8);
     POPCNT.get_or_init(|| arr);
 }
 
@@ -338,9 +351,12 @@ fn init_other_tables() {
             for j in a..=b {
                 let s2 = Square::new_from_n(j as i32);
                 if pseudo_attacks[piece as usize][k] & s2.bb() != 0 {
-                    line_bb[k][j] = (attacks_bb(piece, s1, 0) & attacks_bb(piece, s2, 0)) | s1 | s2;
-                    between_bb[k][j] =
-                        attacks_bb(piece, s1, s2.bb()) & attacks_bb(piece, s2, s1.bb());
+                    line_bb[k][j] = (attacks_bb_helper(piece, s1, 0, &pseudo_attacks)
+                        & attacks_bb_helper(piece, s2, 0, &pseudo_attacks))
+                        | s1
+                        | s2;
+                    between_bb[k][j] = attacks_bb_helper(piece, s1, s2.bb(), &pseudo_attacks)
+                        & attacks_bb_helper(piece, s2, s1.bb(), &pseudo_attacks);
                 }
                 between_bb[k][j] |= s2
             }
@@ -396,17 +412,16 @@ mod test {
         println!("{}", total);
     }
 
-
     // Relies on correctness of sliding_attack function
     #[test]
-    fn test_rook_magics(){
+    fn test_rook_magics() {
         init();
         let a = Square::SqA1 as usize;
         let b = Square::SqH8 as usize;
         for i in a..=b {
             let sq = Square::new_from_n(i as i32);
-            let mut blocker: Bitboard = u64::MAX;
-            let mut empty_tested= false;
+            let mut blocker: Bitboard = !0;
+            let mut empty_tested = false;
             while !empty_tested {
                 empty_tested = blocker == 0;
                 let block: Bitboard = blocker & !sq.bb();
@@ -418,15 +433,16 @@ mod test {
         }
     }
 
+    // Relies on correctness of sliding_attack function
     #[test]
-    fn test_bishop_magics(){
+    fn test_bishop_magics() {
         init();
         let a = Square::SqA1 as usize;
         let b = Square::SqH8 as usize;
         for i in a..=b {
             let sq = Square::new_from_n(i as i32);
             let mut empty_tested = false;
-            let mut blocker: Bitboard = u64::MAX;
+            let mut blocker: Bitboard = !0;
             while !empty_tested {
                 empty_tested = blocker == 0;
                 let block: Bitboard = blocker & !sq.bb();
@@ -438,11 +454,6 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_square_distance() {
-        init_square_distance();
-        let dist = SQUARE_DISTANCE.get().unwrap();
-    }
 
     #[test]
     fn test_more_than_one() {
@@ -452,22 +463,5 @@ mod test {
         assert!(more_than_one(5));
         assert!(more_than_one(7));
         assert!(more_than_one(9));
-    }
-
-    #[test]
-    fn test_sliding_attack() {
-        let rook_squares = vec![Square::SqE4];
-        let rook_occupancies = vec![Square::SqE4];
-
-        let bishop_squares = vec![Square::SqE4];
-        let bishop_occupancies = vec![Square::SqE4];
-
-        init_square_distance();
-        let a = sliding_attack(&PieceType::Rook, Square::SqE4, 0x8000000);
-        let b = sliding_attack(&PieceType::Bishop, Square::SqD4, 0x70000);
-        let c = sliding_attack(&PieceType::Rook, Square::SqH8, 0);
-        let d = sliding_attack(&PieceType::Bishop, Square::SqA1, 0);
-        let e = sliding_attack(&PieceType::Bishop, Square::SqE4, 0);
-        let f = sliding_attack(&PieceType::Rook, Square::SqE4, 0);
     }
 }
