@@ -1,4 +1,5 @@
 use crate::board::bitboard as bb;
+use crate::board::position_macros;
 use crate::board::zobrist;
 use crate::misc::*;
 use crate::types::*;
@@ -22,7 +23,7 @@ fn H2(h: Key) -> i32 {
     ((h >> 16) & 0x1fff) as i32
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 struct StateInfo {
     //Copied when making a move
     material_key: Key,
@@ -32,7 +33,7 @@ struct StateInfo {
     rule_50: i32,
     plies_from_null: i32,
     ep_square: Square,
-
+    state_idx: usize,
     //Not copied when making a move
     key: Key,
     checkers_bb: Bitboard,
@@ -43,30 +44,35 @@ struct StateInfo {
     repition: i32,
 }
 
-struct StatePool {
+#[derive(Default)]
+struct StateStack {
     states: Vec<StateInfo>,
     current: usize,
 }
 
-impl StatePool {
+impl StateStack {
     fn new() -> Self {
         Self {
-            states: vec![StateInfo {
-                material_key: 0,
-                pawn_key: 0,
-                non_pawn_material: [0; COLORNB],
-                castling_rights: 0,
-                rule_50: 0,
-                plies_from_null: 0,
-                ep_square: Square::SqNone,
-                key: 0,
-                checkers_bb: 0,
-                blockers_for_king: [0; COLORNB],
-                pinners: [0; COLORNB],
-                check_squares: [0; PIECE_TYPE_NB],
-                captured_piece: Piece::NoPiece,
-                repition: 0,
-            }; MAX_PLY],
+            states: vec![
+                StateInfo {
+                    material_key: 0,
+                    pawn_key: 0,
+                    non_pawn_material: [0; COLORNB],
+                    castling_rights: 0,
+                    rule_50: 0,
+                    plies_from_null: 0,
+                    ep_square: Square::SqNone,
+                    state_idx: 0,
+                    key: 0,
+                    checkers_bb: 0,
+                    blockers_for_king: [0; COLORNB],
+                    pinners: [0; COLORNB],
+                    check_squares: [0; PIECE_TYPE_NB],
+                    captured_piece: Piece::NoPiece,
+                    repition: 0,
+                };
+                MAX_PLY
+            ],
             current: 0,
         }
     }
@@ -101,7 +107,7 @@ struct Position {
     castling_rights_mask: [i32; SQNB],
     castling_rook_square: [Square; CRNB],
     castling_path: [Bitboard; CRNB],
-    state_pool: StatePool,
+    state_stack: StateStack,
     game_ply: i32,
     side_to_move: Color,
 }
@@ -111,14 +117,29 @@ impl Position {
     //     // let prng = Prng::new(1070372);
 
     // }
+    fn default() -> Self {
+        Self {
+            board: [Piece::NoPiece; SQNB],
+            by_type_bb: [0; PTNB],
+            by_color_bb: [0; COLORNB],
+            piece_count: [64; PNB],
+            castling_rights_mask: [0; SQNB],
+            castling_rook_square: [Square::default(); CRNB],
+            castling_path: [0; CRNB],
+            state_stack: StateStack::default(),
+            game_ply: 0,
+            side_to_move: Color::White,
+        }
+    }
+
     #[inline(always)]
     fn st(&self) -> &StateInfo {
-        self.state_pool.current()
+        self.state_stack.current()
     }
 
     #[inline(always)]
     fn st_mut(&mut self) -> &mut StateInfo {
-        self.state_pool.current_mut()
+        self.state_stack.current_mut()
     }
 
     #[inline]
@@ -144,6 +165,11 @@ impl Position {
     #[inline]
     pub fn pieces_by_piecetype(&self, pt: PieceType) -> Bitboard {
         self.by_type_bb[pt as usize]
+    }
+
+    #[inline]
+    pub fn pieces_by_color(&self, color: Color) -> Bitboard {
+        self.by_color_bb[color as usize]
     }
 
     #[inline]
@@ -207,13 +233,14 @@ impl Position {
     }
 
     pub fn put_piece(&mut self, pc: Piece, s: Square) {
+        let pt = pc.type_of();
         self.board[s as usize] = pc;
         self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] |=
             self.by_type_bb[pc.type_of() as usize];
-        self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] |= s;
+        self.by_type_bb[pt as usize] |= s;
         self.by_color_bb[pc.color() as usize] |= s;
         self.piece_count[pc as usize] += 1;
-        self.piece_count[make_piece(pc.color(), PieceType::AllPieces) as usize] += 1;
+        self.piece_count[make_piece(pc.color(), pc.type_of()) as usize] += 1;
     }
 
     pub fn remove_piece(&mut self, s: Square) {
@@ -238,16 +265,35 @@ impl Position {
     //Initialize various tables used for cycle detection and zobrist hashing
     pub fn init() {
         zobrist::init_zobrist();
-        let psq = zobrist::PSQ.get().unwrap();
-        let enpassant = zobrist::ENPASSANT.get().unwrap();
-        let castling = zobrist::CASTLING.get().unwrap();
-        let side = zobrist::SIDE.get().unwrap();
-        let no_pawns = zobrist::NOPAWNS.get().unwrap();
+        if let Some(psq) = zobrist::PSQ.get() {
+        } else {
+            panic!("Error Initializing zobrist PSQ table");
+        }
+
+        if let Some(psq) = zobrist::ENPASSANT.get() {
+        } else {
+            panic!("Error Initializing zobrist Enpassant table");
+        }
+
+        if let Some(psq) = zobrist::CASTLING.get() {
+        } else {
+            panic!("Error Initializing zobrist Castling table");
+        }
+
+        if let Some(psq) = zobrist::SIDE.get() {
+        } else {
+            panic!("Error Initializing zobrist Side table");
+        }
+
+        if let Some(psq) = zobrist::NOPAWNS.get() {
+        } else {
+            panic!("Error Initializing zobrist Nopawns table");
+        }
 
         let mut cuckoo: [Key; 8192] = [0; 8192];
         let mut cuckoomove: [Key; 8192] = [0; 8192];
         let zpsq = zobrist::PSQ.get().unwrap();
-        let zside =  zobrist::SIDE.get().unwrap();
+        let zside = zobrist::SIDE.get().unwrap();
         for j in 0..8192 {
             cuckoo[j] = 0;
             cuckoomove[j] = 0;
@@ -270,9 +316,10 @@ impl Position {
                             std::mem::swap(&mut cuckoo[m as usize], &mut key);
                             std::mem::swap(&mut cuckoo[m as usize], &mut key);
                             if mv == Move::none() {
-                                break 'inner
+                                break 'inner;
                             }
-                            m = ((m == H1(key)) as i32 * H2(key)) + ((m != H1(key)) as i32 * H1(key));
+                            m = ((m == H1(key)) as i32 * H2(key))
+                                + ((m != H1(key)) as i32 * H1(key));
                         }
                         count += 1;
                     }
@@ -281,6 +328,31 @@ impl Position {
         }
         assert!(count == 3668);
     }
+
+    #[inline]
+    pub fn pieces(&self, pt: PieceType) -> Bitboard {
+        return self.by_type_bb[pt as usize];
+    }
+}
+
+macro_rules! pieces_of_types {
+    ($pos: expr, $pt: expr) => {
+        $pos.pieces_by_piecetype($pt)
+    };
+
+    ($pos: expr, $pt: expr, $($rest_pts: expr),+) => {
+        $pos.pieces_by_piecetype($pt) | pieces_of_types!($pos, $($rest_pts),+)
+    }
+}
+
+macro_rules! pieces_by_color_and_pt {
+    ($pos: expr, $color: expr, $pt: expr) => {
+        $pos.pieces_by_color($color) & pieces_of_types!($pos, $pt)
+    };
+
+    ($pos: expr, $color: expr, $pt: expr, $($rest_pt: expr),+) => {
+        pieces_by_color_and_pt!($pos, $color, $pt) | pieces_by_color_and_pt!($pos, $color, $($rest_pt),+)
+    };
 }
 
 impl fmt::Display for Position {
@@ -305,4 +377,27 @@ mod test {
 
     #[test]
     fn test_position_display() {}
+
+    #[test]
+    fn test_pieces_by_piece_types_macro() {
+        let mut position = Position::default();
+        position.put_piece(Piece::BBishop, Square::SqA1);
+        position.put_piece(Piece::WBishop, Square::SqA8);
+        position.put_piece(Piece::WRook, Square::SqE4);
+        let res = pieces_of_types!(&position, PieceType::Bishop, PieceType::Rook);
+        let r = bb::pretty(res);
+        println!("{}", r);
+    }
+
+    #[test]
+    fn test_pieces_by_color_and_piece_types_macro() {
+        let mut position = Position::default();
+        position.put_piece(Piece::BBishop, Square::SqA1);
+        position.put_piece(Piece::WBishop, Square::SqA8);
+        position.put_piece(Piece::WRook, Square::SqE4);
+        let res = pieces_by_color_and_pt!(&position, Color::Black, PieceType::Bishop, PieceType::Rook);
+        let res = pieces_by_color_and_pt!(&position, Color::White, PieceType::Bishop, PieceType::Rook);
+        let r = bb::pretty(res);
+        println!("{}", r);
+    }
 }

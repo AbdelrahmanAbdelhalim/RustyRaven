@@ -44,8 +44,9 @@ pub const SQA1: usize = Square::SqA1 as usize;
 pub const SQH8: usize = Square::SqA1 as usize;
 
 #[repr(i32)]
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone, Default)]
 pub enum Color {
+    #[default]
     White = 0,
     Black = 1,
     ColorNb = 2,
@@ -79,8 +80,9 @@ pub enum Bound {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub enum Piece {
+    #[default]
     NoPiece = 0,
     WPawn,
     WKnight,
@@ -139,7 +141,7 @@ pub enum Rank {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Square {
     SqA1 = 0, SqB1, SqC1, SqD1, SqE1, SqF1, SqG1, SqH1,
     SqA2, SqB2, SqC2, SqD2, SqE2, SqF2, SqG2, SqH2,
@@ -149,7 +151,9 @@ pub enum Square {
     SqA6, SqB6, SqC6, SqD6, SqE6, SqF6, SqG6, SqH6, 
     SqA7, SqB7, SqC7, SqD7, SqE7, SqF7, SqG7, SqH7,
     SqA8, SqB8, SqC8, SqD8, SqE8, SqF8, SqG8, SqH8,
-    SqNone, SquareNb,
+    SqNone,
+    #[default]
+    SquareNb,
     SquareZero = -1,
 }
 
