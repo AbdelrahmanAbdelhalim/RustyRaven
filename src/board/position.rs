@@ -7,12 +7,36 @@ use std::fmt;
 use std::sync::OnceLock;
 use std::vec::Vec;
 
+use super::bitboard::attacks_bb;
+use super::bitboard::pseudo_attacks_bb;
+use super::bitboard::BETWEEN_BB;
+
 const PIECE_TYPE_NB: usize = PieceType::PieceTypeNb as usize;
 const PIECE_TO_CHAR: &str = " PNBRQK pnbrqk";
 const MAX_PLY: usize = 246; // Maximum search depth
 
 pub static CUCKOO: OnceLock<[Key; 8192]> = OnceLock::new();
 pub static CUCKOO_MOVE: OnceLock<[Key; 8192]> = OnceLock::new();
+
+macro_rules! pieces_of_types {
+    ($pos: expr, $pt: expr) => {
+        $pos.pieces_by_piecetype($pt)
+    };
+
+    ($pos: expr, $pt: expr, $($rest_pts: expr),+) => {
+        $pos.pieces_by_piecetype($pt) | pieces_of_types!($pos, $($rest_pts),+)
+    }
+}
+
+macro_rules! pieces_by_color_and_pt {
+    ($pos: expr, $color: expr, $pt: expr) => {
+        pieces_of_types!($pos, $pt)
+    };
+
+    ($pos: expr, $color: expr, $pt: expr, $($rest_pt: expr),+) => {
+        $pos.pieces_by_color($color) & (pieces_by_color_and_pt!($pos, $color, $pt) | pieces_by_color_and_pt!($pos, $color, $($rest_pt),+))
+    };
+}
 
 #[inline]
 fn H1(h: Key) -> i32 {
@@ -29,7 +53,7 @@ struct StateInfo {
     material_key: Key,
     pawn_key: Key,
     non_pawn_material: [Value; COLORNB],
-    castling_rights: i32,
+    castling_rights: CastlingRights,
     rule_50: i32,
     plies_from_null: i32,
     ep_square: Square,
@@ -58,7 +82,7 @@ impl StateStack {
                     material_key: 0,
                     pawn_key: 0,
                     non_pawn_material: [0; COLORNB],
-                    castling_rights: 0,
+                    castling_rights: CastlingRights::AnyCastling,
                     rule_50: 0,
                     plies_from_null: 0,
                     ep_square: Square::SqNone,
@@ -110,6 +134,7 @@ struct Position {
     state_stack: StateStack,
     game_ply: i32,
     side_to_move: Color,
+    st: StateInfo,
 }
 
 impl Position {
@@ -119,6 +144,7 @@ impl Position {
     // }
     fn default() -> Self {
         Self {
+            st: StateInfo::default(),
             board: [Piece::NoPiece; SQNB],
             by_type_bb: [0; PTNB],
             by_color_bb: [0; COLORNB],
@@ -132,11 +158,87 @@ impl Position {
         }
     }
 
+    pub fn set_castling_right(&mut self, c: Color, rfrom: Square) {
+        let kfrom = self.square(c, PieceType::King);
+        let side;
+        if kfrom < rfrom {
+            side = CastlingRights::KingSide;
+        } else {
+            side = CastlingRights::QueenSide;
+        }
+        let cr = c & side;
+        self.st.castling_rights |= cr;
+        self.castling_rights_mask[kfrom as usize] |= cr as i32;
+        self.castling_rights_mask[rfrom as usize] |= cr as i32;
+        self.castling_rook_square[cr as usize] = rfrom;
+
+        let mut kto: Square;
+        let mut rto: Square;
+
+        if (cr & CastlingRights::KingSide) as i32 != 0 {
+            kto = Square::SqG1;
+        } else {
+            kto = Square::SqC1;
+        }
+        if (cr & CastlingRights::KingSide) as i32 != 0 {
+            rto = Square::SqF1;
+        } else {
+            rto = Square::SqD1;
+        }
+
+        kto = kto.relative_square(c);
+        rto = rto.relative_square(c);
+
+        if let Some(between_bb) = BETWEEN_BB.get() {
+            self.castling_path[cr as usize] = (between_bb[rfrom as usize][rto as usize]
+                | between_bb[kfrom as usize][rto as usize]) & !(kfrom | rfrom as u64); // Can't get why we have to cast here ?
+        } else {
+            panic!("Attempted to access BETWEEN_BB prior to initialization when setting castling rights");
+        }
+    }
+    pub fn set_check_info(&mut self) {
+        self.update_sliders_blockers(Color::White);
+        self.update_sliders_blockers(Color::Black);
+
+        let side_to_move = self.side_to_move;
+        let ksq: Square = self.square(!side_to_move, PieceType::King);
+
+    }
+    pub fn update_sliders_blockers(&mut self, c: Color) {
+        let ksq: Square = self.square(c, PieceType::King);
+        self.st.blockers_for_king[c as usize] = 0;
+        self.st.pinners[!c as usize] = 0;
+
+        let mut snipers: Bitboard = (pseudo_attacks_bb(PieceType::Rook, ksq)
+            & pieces_of_types!(&self, PieceType::Queen, PieceType::Rook))
+            | (pseudo_attacks_bb(PieceType::Bishop, ksq)
+                & pieces_of_types!(&self, PieceType::Queen, PieceType::Bishop))
+                & self.pieces_by_color(!c);
+
+        let occupancy: Bitboard = self.pieces(PieceType::AllPieces) ^ snipers;
+
+        while snipers != 0 {
+            let snipers_sq = bb::pop_lsb(&mut snipers);
+            let b: Bitboard = bb::between_bb(snipers_sq, ksq);
+
+            if b != 0 && bb::more_than_one(b) {
+                self.st.blockers_for_king[c as usize] |= b;
+                if b & pieces_by_color_and_pt!(self, c, PieceType::AllPieces) != 0 {
+                    self.st.pinners[!c as usize] |= snipers_sq;
+                }
+            }
+        }
+    }
+
     #[inline(always)]
     fn st(&self) -> &StateInfo {
         self.state_stack.current()
     }
 
+    #[inline]
+    fn square(&self, c: Color, pt: PieceType) -> Square {
+        return Square::new_from_n(pieces_by_color_and_pt!(&self, c, pt).trailing_zeros() as i32);
+    }
     #[inline(always)]
     fn st_mut(&mut self) -> &mut StateInfo {
         self.state_stack.current_mut()
@@ -179,7 +281,7 @@ impl Position {
 
     #[inline]
     pub fn can_castle(&self, cr: CastlingRights) -> bool {
-        self.st().castling_rights & cr as i32 != 0
+        self.st().castling_rights as i32 & cr as i32 != 0
     }
 
     #[inline]
@@ -335,26 +437,6 @@ impl Position {
     }
 }
 
-macro_rules! pieces_of_types {
-    ($pos: expr, $pt: expr) => {
-        $pos.pieces_by_piecetype($pt)
-    };
-
-    ($pos: expr, $pt: expr, $($rest_pts: expr),+) => {
-        $pos.pieces_by_piecetype($pt) | pieces_of_types!($pos, $($rest_pts),+)
-    }
-}
-
-macro_rules! pieces_by_color_and_pt {
-    ($pos: expr, $color: expr, $pt: expr) => {
-        $pos.pieces_by_color($color) & pieces_of_types!($pos, $pt)
-    };
-
-    ($pos: expr, $color: expr, $pt: expr, $($rest_pt: expr),+) => {
-        pieces_by_color_and_pt!($pos, $color, $pt) | pieces_by_color_and_pt!($pos, $color, $($rest_pt),+)
-    };
-}
-
 impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "\n +---+---+---+---+---+---+---+---+")?;
@@ -376,8 +458,15 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_position_display() {}
+    fn test_position_display() {
+        let mut position = Position::default();
+        position.put_piece(Piece::BBishop, Square::SqA1);
+        position.put_piece(Piece::WBishop, Square::SqA8);
+        position.put_piece(Piece::WRook, Square::SqE4);
+        println!("{}", position);
+    }
 
+    //@todo: Expand this function's testing
     #[test]
     fn test_pieces_by_piece_types_macro() {
         let mut position = Position::default();
@@ -389,15 +478,20 @@ mod test {
         println!("{}", r);
     }
 
+    // @todo: Expand this function's testing
     #[test]
     fn test_pieces_by_color_and_piece_types_macro() {
         let mut position = Position::default();
         position.put_piece(Piece::BBishop, Square::SqA1);
         position.put_piece(Piece::WBishop, Square::SqA8);
         position.put_piece(Piece::WRook, Square::SqE4);
-        let res = pieces_by_color_and_pt!(&position, Color::Black, PieceType::Bishop, PieceType::Rook);
-        let res = pieces_by_color_and_pt!(&position, Color::White, PieceType::Bishop, PieceType::Rook);
-        let r = bb::pretty(res);
-        println!("{}", r);
+        let res_b =
+            pieces_by_color_and_pt!(&position, Color::Black, PieceType::Bishop, PieceType::Rook);
+        let res_w =
+            pieces_by_color_and_pt!(&position, Color::White, PieceType::Bishop, PieceType::Rook);
+        let r_w = bb::pretty(res_w);
+        let r_b = bb::pretty(res_b);
+        println!("{}", r_w);
+        println!("{}", r_b);
     }
 }

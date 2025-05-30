@@ -46,7 +46,7 @@ pub static BISHOP_MAGICS: OnceLock<[Magic; SQNB]> = OnceLock::new();
 static ROOK_TABLE: OnceLock<Vec<Bitboard>> = OnceLock::new();
 static BISHOP_TABLE: OnceLock<Vec<Bitboard>> = OnceLock::new();
 
-const fn more_than_one(bb: Bitboard) -> bool {
+pub const fn more_than_one(bb: Bitboard) -> bool {
     bb & (bb - 1) != 0 // Resets the highest bit
 }
 
@@ -124,15 +124,38 @@ pub fn rook_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
     rook_table[idx]
 }
 
+#[inline]
+pub fn pseudo_attacks_bb(pt: PieceType, s: Square) -> Bitboard {
+    if let Some(pseudo_attacks) = PAWN_ATTACKS.get() {
+        return pseudo_attacks[pt as usize][s as usize];
+    }else {
+        panic!("Attempt to access pseudo attacks table prior to initialization")
+    }
+}
 //These two functions may not be needed
 const fn rank_bb(r: Rank) -> Bitboard {
     RANK1BB << (8 * r as i32)
+}
+
+pub fn pop_lsb(bb: &mut Bitboard) -> Square {
+    let ret: Square = Square::new_from_n(bb.trailing_zeros() as i32);
+    let qbb = *bb as u64 - 1;
+    *bb &= qbb;
+    ret
 }
 
 const fn file_bb(f: File) -> Bitboard {
     FILEABB << f as i32
 }
 
+#[inline]
+pub fn between_bb(s1: Square, s2: Square) -> Bitboard {
+    if let Some(b_bb) = BETWEEN_BB.get() {
+        return b_bb[s1 as usize][s2 as usize]
+    }else {
+        panic!("Attempt to access BetweenBB prior to initialization");
+    }
+}
 #[inline]
 fn least_significant_square_bb(bb: Bitboard) -> Bitboard {
     assert!(bb != 0, "bitboard is empty");

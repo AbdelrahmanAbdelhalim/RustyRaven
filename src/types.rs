@@ -53,7 +53,7 @@ pub enum Color {
 }
 
 #[repr(i32)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub enum CastlingRights {
 
     NoCastling = 0,
@@ -66,6 +66,7 @@ pub enum CastlingRights {
     QueenSide = (1 << 1) | (1 << 3),
     WhiteCastling = 1 | (1 << 1),
     BlackCastling = (1 << 2) | (1 << 3),
+    #[default]
     AnyCastling = 1 | (1 << 1) | (1 << 2) | (1 << 3),
 
     CastlingRightsNb = 16,
@@ -141,7 +142,7 @@ pub enum Rank {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, PartialOrd)]
 pub enum Square {
     SqA1 = 0, SqB1, SqC1, SqD1, SqE1, SqF1, SqG1, SqH1,
     SqA2, SqB2, SqC2, SqD2, SqE2, SqF2, SqG2, SqH2,
@@ -232,6 +233,7 @@ impl Piece {
         }
     }
 }
+
 
 // Overloading Addition operator between Square and Direction
 // Two Variants to allow for addition from either side
@@ -453,6 +455,11 @@ impl Square {
     pub const fn is_square_valid(square: i32) -> bool {
         return square >= Square::SqA1 as i32 && square <= Square::SqH8 as i32
     }
+
+    pub const fn relative_square(&self, c: Color) -> Square {
+        let k = *self as i32 ^ (c as i32 * 56);
+        return Square::new_from_n(k);
+    }
 }
 
 
@@ -474,6 +481,14 @@ impl BitAnd for CastlingRights {
     fn bitand(self, rhs: Self) -> Self {
         let res = self as i32 & rhs as i32;
         unsafe{std::mem::transmute(res)}
+    }
+}
+
+impl BitOrAssign<CastlingRights> for CastlingRights {
+    fn bitor_assign(&mut self, rhs: CastlingRights) {
+        let res = *self as i32 | rhs as i32;
+        let nw: CastlingRights = unsafe{std::mem::transmute(res)};
+        *self = nw;
     }
 }
 //Overload putting CastlingRights on rhs
