@@ -1,3 +1,5 @@
+use crate::board::bitboard::RANK1BB;
+use crate::board::bitboard::RANK8BB;
 use crate::board::bitboard as bb;
 use crate::board::position_macros;
 use crate::board::zobrist;
@@ -345,11 +347,27 @@ impl Position {
         let from: Square = m.from_sq();
         let to: Square = m.to_sq();
         let pc: Piece = self.moved_piece(m);
+        
+        if m.type_of() != MoveType::Normal {
+            todo!()
+        }
 
+        if pc != Piece::NoPiece || pc.color() != us {
+            return false
+        }
 
+        if pieces_by_color_and_pt!(self, us, PieceType::AllPieces) & to != 0 {
+            return false
+        }
 
-        return false
+        if pc.type_of() == PieceType::Pawn {
+            if (RANK8BB | RANK1BB) & to != 0 {
+                return false
+            }
+        }
+        true
     }
+
     #[inline]
     fn square(&self, c: Color, pt: PieceType) -> Square {
         return Square::new_from_n(pieces_by_color_and_pt!(&self, c, pt).trailing_zeros() as i32);
