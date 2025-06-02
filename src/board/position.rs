@@ -1,6 +1,7 @@
 use crate::board::bitboard as bb;
 use crate::board::position_macros;
 use crate::board::zobrist;
+use crate::board::zobrist::ENPASSANT;
 use crate::misc::*;
 use crate::types::*;
 use std::fmt;
@@ -8,6 +9,7 @@ use std::sync::OnceLock;
 use std::vec::Vec;
 
 use super::bitboard::attacks_bb;
+use super::bitboard::get_pseudo_attacks;
 use super::bitboard::pseudo_attacks_bb;
 use super::bitboard::BETWEEN_BB;
 
@@ -191,11 +193,13 @@ impl Position {
 
         if let Some(between_bb) = BETWEEN_BB.get() {
             self.castling_path[cr as usize] = (between_bb[rfrom as usize][rto as usize]
-                | between_bb[kfrom as usize][rto as usize]) & !(kfrom | rfrom as u64); // Can't get why we have to cast here ?
+                | between_bb[kfrom as usize][rto as usize])
+                & !(kfrom | rfrom as u64); // Can't get why we have to cast here ?
         } else {
             panic!("Attempted to access BETWEEN_BB prior to initialization when setting castling rights");
         }
     }
+
     pub fn set_check_info(&mut self) {
         self.update_sliders_blockers(Color::White);
         self.update_sliders_blockers(Color::Black);
@@ -203,7 +207,26 @@ impl Position {
         let side_to_move = self.side_to_move;
         let ksq: Square = self.square(!side_to_move, PieceType::King);
 
+        self.st.check_squares[PieceType::Pawn as usize] =
+            bb::get_pawn_attacks_bb(!side_to_move, ksq);
+        self.st.check_squares[PieceType::Knight as usize] =
+            bb::get_pseudo_attacks(PieceType::Knight, ksq);
+        self.st.check_squares[PieceType::Bishop as usize] = bb::attacks_bb(
+            PieceType::Bishop,
+            ksq,
+            pieces_of_types!(self, PieceType::AllPieces),
+        );
+        self.st.check_squares[PieceType::Rook as usize] = bb::attacks_bb(
+            PieceType::Rook,
+            ksq,
+            pieces_of_types!(self, PieceType::AllPieces),
+        );
+        self.st.check_squares[PieceType::Queen as usize] = self.st.check_squares
+            [PieceType::Bishop as usize]
+            | self.st.check_squares[PieceType::Rook as usize];
+        self.st.check_squares[PieceType::King as usize] = 0;
     }
+
     pub fn update_sliders_blockers(&mut self, c: Color) {
         let ksq: Square = self.square(c, PieceType::King);
         self.st.blockers_for_king[c as usize] = 0;
@@ -230,11 +253,103 @@ impl Position {
         }
     }
 
+    pub fn set_state(&mut self) {
+        if let Some(nopawns) = zobrist::NOPAWNS.get() {
+            self.st.pawn_key = *nopawns;
+        } else {
+            panic!("Attempted to access zobrist - nopawns before initialization");
+        }
+        self.st.key = 0;
+        self.st.material_key = 0;
+        self.st.non_pawn_material[Color::White as usize] = 0;
+        self.st.non_pawn_material[Color::Black as usize] = 0;
+
+        self.set_check_info();
+    }
+
     #[inline(always)]
     fn st(&self) -> &StateInfo {
         self.state_stack.current()
     }
 
+    pub fn attackers_to(&self, s: Square, occupied: Bitboard) -> Bitboard {
+        return (bb::get_pawn_attacks_bb(Color::Black, s)
+            & pieces_by_color_and_pt!(self, Color::White, PieceType::Pawn))
+            | (bb::get_pawn_attacks_bb(Color::White, s)
+                & pieces_by_color_and_pt!(self, Color::Black, PieceType::Pawn))
+            | bb::get_pseudo_attacks(PieceType::Knight, s)
+                & pieces_of_types!(self, PieceType::Knight)
+            | bb::attacks_bb(PieceType::Rook, s, occupied)
+                & pieces_of_types!(self, PieceType::Rook, PieceType::Queen)
+            | bb::attacks_bb(PieceType::Bishop, s, occupied)
+                & pieces_of_types!(self, PieceType::Bishop, PieceType::Queen)
+            | bb::get_pseudo_attacks(PieceType::King, s) & pieces_of_types!(self, PieceType::King);
+    }
+
+    pub fn legal(self, m: Move) -> bool {
+        assert!(&m.is_ok());
+        let us: Color = self.side_to_move;
+        let from = m.from_sq();
+        let mut to = m.to_sq();
+
+        assert!(self.moved_piece(m).color() == us);
+
+        if m.type_of() == MoveType::EnPassant {
+            let ksq: Square = self.square(us, PieceType::King);
+            let capsq: Square = to - pawn_push(us);
+            let occupied: Bitboard =
+                (pieces_of_types!(self, PieceType::AllPieces) ^ from ^ capsq) | to;
+            return false;
+        }
+
+        if m.type_of() == MoveType::Castling {
+            to = if to > from {
+                Square::SqG1
+            } else {
+                Square::SqC1
+            }
+            .relative_square(us);
+
+            let step: Direction = if to > from {
+                Direction::West
+            } else {
+                Direction::East
+            };
+
+            let mut s = to;
+            while s != from {
+                if self.attackers_to(s, pieces_of_types!(self, PieceType::AllPieces))
+                    & pieces_by_color_and_pt!(self, !us, PieceType::AllPieces)
+                    != 0
+                {
+                    return false;
+                }
+                s += step;
+            }
+        }
+
+        if self.piece_on(from).type_of() == PieceType::King {
+            return self.attackers_to(to, pieces_of_types!(self, PieceType::AllPieces) ^ from)
+                & pieces_by_color_and_pt!(self, c, PieceType::AllPieces)
+                == 0;
+        }
+
+        return (self.blockers_for_king(us) & from) == 0
+            || bb::alligned(from, to, self.square(us, PieceType::King))
+    }
+
+    pub fn pseudo_legal(&self, m: Move) -> bool {
+        assert!(m.is_ok());
+
+        let us: Color = self.side_to_move;
+        let from: Square = m.from_sq();
+        let to: Square = m.to_sq();
+        let pc: Piece = self.moved_piece(m);
+
+
+
+        return false
+    }
     #[inline]
     fn square(&self, c: Color, pt: PieceType) -> Square {
         return Square::new_from_n(pieces_by_color_and_pt!(&self, c, pt).trailing_zeros() as i32);

@@ -167,7 +167,7 @@ pub enum PieceType {
 }
 
 #[repr(i32)]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum MoveType {
     Normal,
     Promotion = 1 << 14,
@@ -595,7 +595,7 @@ pub const fn relative_rank(color: Color, rank: Rank) -> Rank {
 // 14-15 special move flag: promotion(1), en_passant(2), castling(3)
 // en_passant bit is only set if a pawn can be captured
 // Special cases are move::none() and move::null()
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Move {
     data: u16,
 }

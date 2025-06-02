@@ -84,6 +84,31 @@ pub const fn pawn_attacks_bb(bb: Bitboard, c: Color) -> Bitboard {
     }
 }
 
+pub fn get_pawn_attacks_bb(c: Color, s: Square) -> Bitboard {
+    if let Some(pawn_attacks) = PAWN_ATTACKS.get() {
+        return pawn_attacks[c as usize][s as usize];
+    }else {
+        panic!("Attempt to access pawn attacks table prior to initialization");
+    }
+}
+
+pub fn get_pseudo_attacks(pt: PieceType, s: Square) -> Bitboard {
+    if let Some(pseudo_attacks) = PSEUDO_ATTACKS.get() {
+        return pseudo_attacks[pt as usize][s as usize]
+    }else {
+        panic!("Attempt to access pseudo attacs prior to initializaiton")
+    }
+}
+
+pub fn alligned(s1: Square, s2: Square, s3: Square) -> bool {
+    if let Some(line_bb) = LINE_BB.get() {
+        let a = line_bb[s1 as usize][s2 as usize];
+        return a & s3 != 0
+    }else {
+        panic!("Attempt to use Line BB table prior to initialization");
+    }
+}
+
 pub fn attacks_bb(pt: PieceType, s: Square, occupied: Bitboard) -> Bitboard {
     let pseudo_attacks = PSEUDO_ATTACKS.get().unwrap();
     match pt {
