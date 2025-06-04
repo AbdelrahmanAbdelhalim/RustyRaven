@@ -1,9 +1,10 @@
-use std::ops::{Add, AddAssign, Sub, SubAssign, Not, BitAnd, BitOr, BitXor, BitOrAssign, BitXorAssign};
+use std::ops::{
+    Add, AddAssign, BitAnd, BitOr, BitOrAssign, BitXor, BitXorAssign, Mul, Not, Sub, SubAssign,
+};
 pub type Bitboard = u64;
 pub type Value = i32;
 pub type Key = u64;
-pub type Depth = i32; 
-
+pub type Depth = i32;
 
 const MAX_MOVES: i32 = 256;
 const MAX_PLY: i32 = 246;
@@ -26,8 +27,23 @@ const ROOKVALUE: Value = 1276;
 const QUEENVALUE: Value = 2538;
 
 const PIECEVALE: [Value; Piece::PieceNb as usize] = [
-VALUE_ZERO, PAWNVALUE, KNIGHTVALUE, BISHOPVALUE, ROOKVALUE, QUEENVALUE, VALUE_ZERO, VALUE_ZERO, 
-VALUE_ZERO, PAWNVALUE, KNIGHTVALUE, BISHOPVALUE, ROOKVALUE, QUEENVALUE, VALUE_ZERO, VALUE_ZERO ];
+    VALUE_ZERO,
+    PAWNVALUE,
+    KNIGHTVALUE,
+    BISHOPVALUE,
+    ROOKVALUE,
+    QUEENVALUE,
+    VALUE_ZERO,
+    VALUE_ZERO,
+    VALUE_ZERO,
+    PAWNVALUE,
+    KNIGHTVALUE,
+    BISHOPVALUE,
+    ROOKVALUE,
+    QUEENVALUE,
+    VALUE_ZERO,
+    VALUE_ZERO,
+];
 
 const RANK1BB: Bitboard = 0xFF;
 const FILEABB: Bitboard = 0x0101010101010101;
@@ -37,8 +53,8 @@ pub const PNB: usize = Piece::PieceNb as usize;
 pub const PTNB: usize = PieceType::PieceTypeNb as usize;
 pub const COLORNB: usize = Color::ColorNb as usize;
 pub const CRNB: usize = CastlingRights::CastlingRightsNb as usize;
-pub const FNB: usize = 8; 
-pub const RNB: usize = 8; 
+pub const FNB: usize = 8;
+pub const RNB: usize = 8;
 
 pub const SQA1: usize = Square::SqA1 as usize;
 pub const SQH8: usize = Square::SqA1 as usize;
@@ -55,7 +71,6 @@ pub enum Color {
 #[repr(i32)]
 #[derive(Debug, PartialEq, Clone, Copy, Default)]
 pub enum CastlingRights {
-
     NoCastling = 0,
     WhiteOO = 1,
     WhiteOOO = 1 << 1,
@@ -100,6 +115,76 @@ pub enum Piece {
     PieceNb = 16,
 }
 
+impl Piece {
+    pub const fn type_of(&self) -> PieceType {
+        match self {
+            Piece::WPawn => PieceType::Pawn,
+            Piece::BPawn => PieceType::Pawn,
+            Piece::WKnight => PieceType::Knight,
+            Piece::BKnight => PieceType::Knight,
+            Piece::WBishop => PieceType::Bishop,
+            Piece::BBishop => PieceType::Bishop,
+            Piece::WRook => PieceType::Rook,
+            Piece::BRook => PieceType::Rook,
+            Piece::WQueen => PieceType::Queen,
+            Piece::BQueen => PieceType::Queen,
+            Piece::WKing => PieceType::King,
+            Piece::BKing => PieceType::King,
+            _ => panic!(),
+        }
+    }
+
+    pub const fn color(&self) -> Color {
+        match self {
+            Piece::WPawn => Color::White,
+            Piece::WKnight => Color::White,
+            Piece::WBishop => Color::White,
+            Piece::WRook => Color::White,
+            Piece::WQueen => Color::White,
+            Piece::WKing => Color::White,
+
+            Piece::BPawn => Color::Black,
+            Piece::BKnight => Color::Black,
+            Piece::BBishop => Color::Black,
+            Piece::BRook => Color::Black,
+            Piece::BQueen => Color::Black,
+            Piece::BKing => Color::Black,
+
+            _ => panic!(),
+        }
+    }
+
+    pub const fn new_from_n(i: usize) -> Self {
+        match i {
+            0 => Piece::NoPiece,
+            1 => Piece::WPawn,
+            2 => Piece::WKnight,
+            3 => Piece::WBishop,
+            4 => Piece::WRook,
+            5 => Piece::WQueen,
+            6 => Piece::WKing,
+            9 => Piece::BPawn,
+            10 => Piece::BKnight,
+            11 => Piece::BBishop,
+            12 => Piece::BRook,
+            13 => Piece::BQueen,
+            14 => Piece::BKing,
+            _ => panic!("Invalid piece index"),
+        }
+    }
+}
+impl Not for Piece {
+    type Output = Self;
+    fn not(self) -> Self {
+        let result = self as i8 ^ 8;
+        if (result >= 0 && result <= 6) || (result >= 9 && result <= 14) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            panic!()
+        }
+    }
+}
+
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Direction {
@@ -112,6 +197,96 @@ pub enum Direction {
     NorthEast = 8 + 1,
     SouthEast = -8 + 1,
     SouthWest = -8 - 1,
+}
+
+impl Direction {
+    pub fn to_num(&self) -> i32 {
+        match self {
+            Direction::North => 8,
+            Direction::East => 1,
+            Direction::South => -8,
+            Direction::West => -1,
+            Direction::NorthWest => 8 - 1,
+            Direction::NorthEast => 8 + 1,
+            Direction::SouthEast => -8 + 1,
+            Direction::SouthWest => -8 - 1,
+        }
+    }
+
+    pub fn from_num(n: i32) -> Self {
+        match n {
+            8 => Direction::North,
+            1 => Direction::East,
+            -8 => Direction::South,
+            -1 => Direction::West,
+            7 => Direction::NorthWest, 
+            9 => Direction::NorthEast,
+            -7 => Direction::SouthEast,
+            -9 => Direction::SouthWest,
+            _ => panic!("Invalid Direction Nunmber")
+        }
+    }
+}
+// Overloading Addition operator between Square and Direction
+// Two Variants to allow for addition from either side
+impl Add<Direction> for Square {
+    type Output = Self;
+    fn add(self, b: Direction) -> Self {
+        let result = self as i32 + b as i32;
+        if Square::is_square_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            Square::SqNone
+        }
+    }
+}
+impl Add<i32> for Square {
+    type Output = Self;
+    fn add(self, rhs: i32) -> Self {
+        let result = self as i32 + rhs;
+        if Square::is_square_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            Square::SqNone
+        }
+    }
+}
+impl Add<Square> for Direction {
+    type Output = Square;
+    fn add(self, rhs: Square) -> Square {
+        let result = self as i32 + rhs as i32;
+        if Square::is_square_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            Square::SqNone
+        }
+    }
+}
+
+impl Add<Direction> for Direction {
+    type Output = Self;
+    fn add(self, rhs: Direction) -> Self {
+        let result = self as i32 + rhs as i32;
+        unsafe { std::mem::transmute(result) }
+    }
+}
+
+
+//Overloading subtraction between two directions
+impl Sub<Direction> for Direction {
+    type Output = Self;
+    fn sub(self, rhs: Direction) -> Self {
+        let result = self as i32 - rhs as i32;
+        unsafe { std::mem::transmute(result) }
+    }
+}
+
+impl Mul<i32> for Direction {
+    type Output = i32;
+    fn mul(self, rhs: i32) -> i32 {
+        let val = self.to_num();
+        return rhs * val
+    }
 }
 
 #[repr(i32)]
@@ -144,25 +319,213 @@ pub enum Rank {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Default, PartialOrd)]
 pub enum Square {
-    SqA1 = 0, SqB1, SqC1, SqD1, SqE1, SqF1, SqG1, SqH1,
-    SqA2, SqB2, SqC2, SqD2, SqE2, SqF2, SqG2, SqH2,
-    SqA3, SqB3, SqC3, SqD3, SqE3, SqF3, SqG3, SqH3,
-    SqA4, SqBA4, SqC4, SqD4, SqE4, SqF4, SqG4, SqH4,
-    SqA5, SqB5, SqC5, SqD5, SqE5, SqF5, SqG5, SqH5,
-    SqA6, SqB6, SqC6, SqD6, SqE6, SqF6, SqG6, SqH6, 
-    SqA7, SqB7, SqC7, SqD7, SqE7, SqF7, SqG7, SqH7,
-    SqA8, SqB8, SqC8, SqD8, SqE8, SqF8, SqG8, SqH8,
+    SqA1 = 0,
+    SqB1,
+    SqC1,
+    SqD1,
+    SqE1,
+    SqF1,
+    SqG1,
+    SqH1,
+    SqA2,
+    SqB2,
+    SqC2,
+    SqD2,
+    SqE2,
+    SqF2,
+    SqG2,
+    SqH2,
+    SqA3,
+    SqB3,
+    SqC3,
+    SqD3,
+    SqE3,
+    SqF3,
+    SqG3,
+    SqH3,
+    SqA4,
+    SqBA4,
+    SqC4,
+    SqD4,
+    SqE4,
+    SqF4,
+    SqG4,
+    SqH4,
+    SqA5,
+    SqB5,
+    SqC5,
+    SqD5,
+    SqE5,
+    SqF5,
+    SqG5,
+    SqH5,
+    SqA6,
+    SqB6,
+    SqC6,
+    SqD6,
+    SqE6,
+    SqF6,
+    SqG6,
+    SqH6,
+    SqA7,
+    SqB7,
+    SqC7,
+    SqD7,
+    SqE7,
+    SqF7,
+    SqG7,
+    SqH7,
+    SqA8,
+    SqB8,
+    SqC8,
+    SqD8,
+    SqE8,
+    SqF8,
+    SqG8,
+    SqH8,
     SqNone,
     #[default]
     SquareNb,
     SquareZero = -1,
 }
 
+// Overloading subtraction of a direction from a square
+impl Sub<Direction> for Square {
+    type Output = Self;
+    fn sub(self, rhs: Direction) -> Self {
+        let result = self as i32 - rhs as i32;
+        if result >= 0 && result <= Square::SqH8 as i32 {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            Square::SqNone
+        }
+    }
+}
+
+//Overloading += between square and direction.
+impl AddAssign<Direction> for Square {
+    fn add_assign(&mut self, rhs: Direction) {
+        let result = *self + rhs;
+        if result as i32 >= Square::SqA1 as i32 && result as i32 <= Square::SqH8 as i32 {
+            *self = *self + rhs;
+        } else {
+            *self = Square::SqNone;
+        }
+    }
+}
+
+//Overloading -= between square and direction
+impl SubAssign<Direction> for Square {
+    fn sub_assign(&mut self, rhs: Direction) {
+        *self = *self - rhs;
+    }
+}
+
+impl BitAnd<Bitboard> for Square {
+    type Output = Bitboard;
+    fn bitand(self, rhs: Bitboard) -> Bitboard {
+        rhs & self
+    }
+}
+
+impl BitOr<Bitboard> for Square {
+    type Output = Bitboard;
+    fn bitor(self, rhs: Bitboard) -> Bitboard {
+        rhs | self
+    }
+}
+
+impl Square {
+    pub const fn new_from_n(n: i32) -> Self {
+        if Square::is_square_valid(n) {
+            unsafe { std::mem::transmute(n) }
+        } else {
+            Self::SqNone
+        }
+    }
+    pub const fn flip_rank(&self) -> Self {
+        let result = *self as i32 ^ Square::SqA8 as i32;
+        if Self::is_square_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            panic!()
+        }
+    }
+
+    pub const fn flip_file(&self) -> Self {
+        let result = *self as i32 ^ Square::SqH1 as i32;
+        if Self::is_square_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            panic!()
+        }
+    }
+
+    pub const fn file_of(&self) -> File {
+        let result = *self as i32 & 7;
+        if is_file_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            panic!()
+        }
+    }
+
+    pub const fn rank_of(&self) -> Rank {
+        let result = *self as i32 >> 3;
+        if is_rank_valid(result) {
+            unsafe { std::mem::transmute(result) }
+        } else {
+            panic!()
+        }
+    }
+
+    pub const fn relative_rank(&self, c: Color) -> Rank {
+        relative_rank(c, self.rank_of())
+    }
+
+    pub const fn bb(&self) -> Bitboard {
+        1 << *self as i32
+    }
+
+    pub const fn rank_bb(&self) -> Bitboard {
+        RANK1BB << 8 * (self.rank_of() as i32)
+    }
+
+    pub const fn file_bb(&self) -> Bitboard {
+        FILEABB << self.file_of() as i32
+    }
+
+    pub const fn rank_distance_from(&self, s: Square) -> i32 {
+        let result = self.rank_of() as i32 - s.rank_of() as i32;
+        let r = result.abs();
+        r
+    }
+
+    pub const fn file_distance_from(&self, s: Square) -> i32 {
+        let result = self.file_of() as i32 - s.file_of() as i32;
+        let r = result.abs();
+        r
+    }
+
+    pub const fn is_square_valid(square: i32) -> bool {
+        return square >= Square::SqA1 as i32 && square <= Square::SqH8 as i32;
+    }
+
+    pub const fn relative_square(&self, c: Color) -> Square {
+        let k = *self as i32 ^ (c as i32 * 56);
+        return Square::new_from_n(k);
+    }
+}
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PieceType {
     AllPieces = -1,
     NoPieceType,
-    Pawn, Knight, Bishop, Rook, Queen, King,
+    Pawn,
+    Knight,
+    Bishop,
+    Rook,
+    Queen,
+    King,
     PieceTypeNb = 8,
 }
 
@@ -175,142 +538,14 @@ pub enum MoveType {
     Castling = 3 << 14,
 }
 
-impl Piece {
-    pub const fn type_of(&self) -> PieceType {
-        match self {
-            Piece::WPawn => PieceType::Pawn,
-            Piece::BPawn => PieceType::Pawn,
-            Piece::WKnight => PieceType::Knight,
-            Piece::BKnight => PieceType::Knight,
-            Piece::WBishop => PieceType::Bishop,
-            Piece::BBishop => PieceType::Bishop,
-            Piece::WRook => PieceType::Rook,
-            Piece::BRook => PieceType::Rook,
-            Piece::WQueen => PieceType::Queen,
-            Piece::BQueen => PieceType::Queen,
-            Piece::WKing => PieceType::King,
-            Piece::BKing => PieceType::King,
-            _ => panic!()
-        }
-    }
-
-    pub const fn color(&self) -> Color {
-        match self {
-            Piece::WPawn => Color::White, 
-            Piece::WKnight => Color::White, 
-            Piece::WBishop => Color::White,
-            Piece::WRook => Color::White,
-            Piece::WQueen => Color::White,
-            Piece::WKing => Color::White,
-
-            Piece::BPawn => Color::Black,
-            Piece::BKnight => Color::Black, 
-            Piece::BBishop => Color::Black,
-            Piece::BRook => Color::Black,
-            Piece::BQueen => Color::Black,
-            Piece::BKing => Color::Black,
-
-            _ => panic!()
-        }
-    }
-
-    pub const fn new_from_n(i: usize) -> Self {
-        match i {
-            0 => Piece::NoPiece,
-            1 => Piece::WPawn,
-            2 => Piece::WKnight,
-            3 => Piece::WBishop,
-            4 => Piece::WRook,
-            5 => Piece::WQueen,
-            6 => Piece::WKing,
-            9 => Piece::BPawn,
-            10 => Piece::BKnight,
-            11 => Piece::BBishop,
-            12 => Piece::BRook,
-            13 => Piece::BQueen,
-            14 => Piece::BKing,
-            _ => panic!("Invalid piece index"),
-        }
-    }
-}
 
 
-// Overloading Addition operator between Square and Direction
-// Two Variants to allow for addition from either side
-impl Add<Direction> for Square {
-    type Output = Self;
-    fn add(self, b: Direction) -> Self {
-        let result = self as i32 + b as i32;
-        if Square::is_square_valid(result){
-            unsafe {std::mem::transmute(result)}
-        }else {
-            Square::SqNone
-        }
-    }
-}
-impl Add<Square> for Direction {
-    type Output = Square;
-    fn add(self, rhs: Square) -> Square {
-        let result = self as i32 + rhs as i32;
-        if Square::is_square_valid(result){
-            unsafe {std::mem::transmute(result)}
-        }else {
-            Square::SqNone
-        }
-    }
-}
 
-// Overloading subtractino of a direction from a square
-impl Sub<Direction> for Square {
-    type Output = Self;
-    fn sub(self, rhs: Direction) -> Self {
-        let result = self as i32 - rhs as i32;
-        if result >=0 && result <= Square::SqH8 as i32 {
-            unsafe {std::mem::transmute(result)}
-        }else {
-            Square::SqNone
-        }
-    }
-}
 
-//Overloading += between square and direction.
-impl AddAssign<Direction> for Square {
-    fn add_assign(&mut self, rhs: Direction) {
-        let result = *self + rhs;
-        if result as i32 >= Square::SqA1 as i32 && result as i32 <= Square::SqH8 as i32 {
-            *self = *self + rhs;
-        }else {
-            *self = Square::SqNone;
-        }
-    }
-}
-
-//Overloading -= between square and direction
-impl SubAssign<Direction> for Square {
-    fn sub_assign(&mut self, rhs: Direction) {
-            *self = *self - rhs;
-        }
-    }
 
 //Overloading addition between two directions
-impl Add<Direction> for Direction {
-    type Output = Self;
-    fn add(self, rhs: Direction) -> Self {
-        let result = self as i32 + rhs as i32;
-        unsafe {std::mem::transmute(result)}
-    }
-}
 
-//Overloading subtraction between two directions
-impl Sub<Direction> for Direction {
-    type Output = Self;
-    fn sub(self, rhs: Direction) -> Self {
-        let result = self as i32 - rhs as i32;
-        unsafe{std::mem::transmute(result)}
-    }
-}
-
-//Overloading Not for Colors 
+//Overloading Not for Colors
 impl Not for Color {
     type Output = Self;
     fn not(self) -> Self {
@@ -322,17 +557,7 @@ impl Not for Color {
     }
 }
 
-impl Not for Piece {
-    type Output = Self;
-    fn not(self) -> Self {
-        let result = self as i8 ^ 8;
-        if (result >= 0 && result <= 6) || (result >= 9 && result <= 14) {
-            unsafe {std::mem::transmute(result)}
-        }else {
-            panic!()
-        } 
-    }
-}
+
 
 impl BitAnd<Square> for Bitboard {
     type Output = Bitboard;
@@ -366,102 +591,6 @@ impl BitXorAssign<Square> for Bitboard {
     }
 }
 
-impl BitAnd<Bitboard> for Square {
-    type Output = Bitboard;
-    fn bitand(self, rhs: Bitboard) -> Bitboard {
-        rhs & self
-    }
-}
-
-impl BitOr<Bitboard> for Square {
-    type Output = Bitboard;
-    fn bitor(self, rhs: Bitboard) -> Bitboard {
-        rhs | self
-    }
-}
-
-impl Square {
-    pub const fn new_from_n(n: i32) -> Self {
-        if Square::is_square_valid(n){
-            unsafe {std::mem::transmute(n)}
-        }else {
-            Self::SqNone
-        }
-    }
-    pub const fn flip_rank(&self) -> Self {
-        let result = *self as i32 ^ Square::SqA8 as i32;
-        if Self::is_square_valid(result){
-            unsafe {std::mem::transmute(result)}
-        }else {
-            panic!()
-        }
-    }
-
-    pub const fn flip_file(&self) -> Self {
-        let result = *self as i32 ^ Square::SqH1 as i32;
-        if Self::is_square_valid(result){
-            unsafe {std::mem::transmute(result)}
-        }else {
-            panic!()
-        }
-    }
-
-    pub const fn file_of(&self) -> File {
-        let result = *self as i32 & 7;
-        if is_file_valid(result) {
-            unsafe {std::mem::transmute(result)}
-        }else {
-            panic!()
-        }
-    }
-
-    pub const fn rank_of(&self) -> Rank {
-        let result = *self as i32 >> 3;
-        if is_rank_valid(result) {
-            unsafe {std::mem::transmute(result)} 
-        }else {
-            panic!()
-        }
-    }
-
-    pub const fn relative_rank(&self, c: Color) -> Rank {
-        relative_rank(c, self.rank_of())
-    }
-
-    pub const fn bb(&self) -> Bitboard {
-        1 << *self as i32 
-    }
-
-    pub const fn rank_bb(&self) -> Bitboard {
-        RANK1BB << 8 * (self.rank_of() as i32) 
-    }
-
-    pub const fn file_bb(&self) -> Bitboard {
-        FILEABB << self.file_of() as i32
-    }
-
-    pub const fn rank_distance_from(&self, s: Square) -> i32 {
-        let result = self.rank_of() as i32 - s.rank_of() as i32;
-        let r = result.abs();
-        r
-    }
-
-    pub const fn file_distance_from(&self, s: Square) -> i32 {
-        let result = self.file_of() as i32 - s.file_of() as i32;
-        let r = result.abs();
-        r
-    }
-
-    pub const fn is_square_valid(square: i32) -> bool {
-        return square >= Square::SqA1 as i32 && square <= Square::SqH8 as i32
-    }
-
-    pub const fn relative_square(&self, c: Color) -> Square {
-        let k = *self as i32 ^ (c as i32 * 56);
-        return Square::new_from_n(k);
-    }
-}
-
 
 
 //Overload BitAnd Between Color and Castling Rights
@@ -469,9 +598,13 @@ impl BitAnd<Color> for CastlingRights {
     type Output = Self;
     fn bitand(self, rhs: Color) -> CastlingRights {
         match rhs {
-            Color::White => unsafe {std::mem::transmute(CastlingRights::WhiteCastling as i32 & self as i32)},
-            Color::Black => unsafe {std::mem::transmute(CastlingRights::BlackCastling as i32 & self as i32)},
-            _ => panic!()
+            Color::White => unsafe {
+                std::mem::transmute(CastlingRights::WhiteCastling as i32 & self as i32)
+            },
+            Color::Black => unsafe {
+                std::mem::transmute(CastlingRights::BlackCastling as i32 & self as i32)
+            },
+            _ => panic!(),
         }
     }
 }
@@ -480,14 +613,14 @@ impl BitAnd for CastlingRights {
     type Output = Self;
     fn bitand(self, rhs: Self) -> Self {
         let res = self as i32 & rhs as i32;
-        unsafe{std::mem::transmute(res)}
+        unsafe { std::mem::transmute(res) }
     }
 }
 
 impl BitOrAssign<CastlingRights> for CastlingRights {
     fn bitor_assign(&mut self, rhs: CastlingRights) {
         let res = *self as i32 | rhs as i32;
-        let nw: CastlingRights = unsafe{std::mem::transmute(res)};
+        let nw: CastlingRights = unsafe { std::mem::transmute(res) };
         *self = nw;
     }
 }
@@ -496,9 +629,13 @@ impl BitAnd<CastlingRights> for Color {
     type Output = CastlingRights;
     fn bitand(self, rhs: CastlingRights) -> CastlingRights {
         match self {
-            Color::White => unsafe {std::mem::transmute(CastlingRights::WhiteCastling as i32 & rhs as i32)},
-            Color::Black => unsafe {std::mem::transmute(CastlingRights::BlackCastling as i32 & rhs as i32)},
-            _ => panic!()
+            Color::White => unsafe {
+                std::mem::transmute(CastlingRights::WhiteCastling as i32 & rhs as i32)
+            },
+            Color::Black => unsafe {
+                std::mem::transmute(CastlingRights::BlackCastling as i32 & rhs as i32)
+            },
+            _ => panic!(),
         }
     }
 }
@@ -512,9 +649,9 @@ pub const fn mated_in(ply: i32) -> Value {
 
 pub const fn make_square(f: usize, r: usize) -> Square {
     let result = ((r as i32) << 3) + f as i32;
-    if Square::is_square_valid(result){
-        unsafe {std::mem::transmute(result)}
-    }else {
+    if Square::is_square_valid(result) {
+        unsafe { std::mem::transmute(result) }
+    } else {
         panic!()
     }
 }
@@ -523,7 +660,7 @@ pub const fn make_piece(c: Color, pt: PieceType) -> Piece {
     match c {
         Color::White => make_white_piece(pt),
         Color::Black => make_black_piece(pt),
-        Color::ColorNb => panic!()
+        Color::ColorNb => panic!(),
     }
 }
 
@@ -535,7 +672,7 @@ pub const fn make_white_piece(pt: PieceType) -> Piece {
         PieceType::Rook => Piece::WRook,
         PieceType::Queen => Piece::WQueen,
         PieceType::King => Piece::WKing,
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
@@ -547,11 +684,9 @@ pub const fn make_black_piece(pt: PieceType) -> Piece {
         PieceType::Rook => Piece::BRook,
         PieceType::Queen => Piece::BQueen,
         PieceType::King => Piece::BKing,
-        _ => panic!()
+        _ => panic!(),
     }
 }
-
-
 
 pub const fn is_valid_move_type(data: u16) -> bool {
     data == 0 || data == (1 << 14) || data == (2 << 14) || data == (3 << 14)
@@ -573,7 +708,7 @@ pub const fn pawn_push(color: Color) -> Direction {
         Color::Black => Direction::South,
         _ => panic!(),
     }
-} 
+}
 
 pub const fn make_key(seed: u64) -> Key {
     return (seed * 6364136223846793005 + 1442695040888963407) as Key;
@@ -581,11 +716,15 @@ pub const fn make_key(seed: u64) -> Key {
 
 pub const fn relative_rank(color: Color, rank: Rank) -> Rank {
     let result = (rank as i32) ^ (color as i32 * 7);
-    if is_rank_valid(result){
-        unsafe{std::mem::transmute(result)}
-    }else {
+    if is_rank_valid(result) {
+        unsafe { std::mem::transmute(result) }
+    } else {
         panic!()
     }
+}
+
+pub const fn relative_rank_of_square(c: Color, s: Square) -> Rank {
+    return relative_rank(c, s.rank_of());
 }
 
 // A move needs 16 bits
@@ -602,16 +741,12 @@ pub struct Move {
 
 impl Move {
     pub const fn new(data: u16) -> Self {
-        Move {
-            data: data,
-        }
+        Move { data: data }
     }
 
     pub const fn new_from_to_sq(from: Square, to: Square) -> Self {
         let data = ((from as usize) << 6) & to as usize;
-        Move {
-            data: data as u16,
-        }
+        Move { data: data as u16 }
     }
     pub const fn from_to(&self) -> u16 {
         self.data & 0xFFF
@@ -620,17 +755,17 @@ impl Move {
     pub const fn from_sq(&self) -> Square {
         let result = (self.data >> 6) & 0x3F;
         if Square::is_square_valid(result as i32) {
-            unsafe {std::mem::transmute(result as i32)}
-        }else {
+            unsafe { std::mem::transmute(result as i32) }
+        } else {
             panic!()
         }
     }
 
     pub const fn to_sq(&self) -> Square {
-        let result = self.data  & 0x3F;
+        let result = self.data & 0x3F;
         if Square::is_square_valid(result as i32) {
-            unsafe {std::mem::transmute(result as i32)}
-        }else {
+            unsafe { std::mem::transmute(result as i32) }
+        } else {
             panic!()
         }
     }
@@ -645,7 +780,7 @@ impl Move {
             promotion => MoveType::Promotion,
             enpassant => MoveType::EnPassant,
             castling => MoveType::Castling,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 
@@ -656,7 +791,7 @@ impl Move {
             1 => PieceType::Bishop,
             2 => PieceType::Rook,
             3 => PieceType::Queen,
-            _ => panic!()
+            _ => panic!(),
         }
     }
 
@@ -669,15 +804,11 @@ impl Move {
     }
 
     pub const fn null() -> Self {
-        Move {
-            data: 0,
-        }
+        Move { data: 0 }
     }
 
     pub const fn none() -> Self {
-        Move {
-            data: 65,
-        }
+        Move { data: 65 }
     }
 
     pub const fn is_ok(&self) -> bool {
@@ -750,8 +881,14 @@ mod tests {
 
     #[test]
     fn test_make_square() {
-        assert_eq!(make_square(File::FileA as usize, Rank::Rank1 as usize), Square::SqA1);
-        assert_eq!(make_square(File::FileH as usize, Rank::Rank8 as usize), Square::SqH8);
+        assert_eq!(
+            make_square(File::FileA as usize, Rank::Rank1 as usize),
+            Square::SqA1
+        );
+        assert_eq!(
+            make_square(File::FileH as usize, Rank::Rank8 as usize),
+            Square::SqH8
+        );
     }
 
     #[test]
@@ -849,14 +986,26 @@ mod tests {
 
     #[test]
     fn test_castling_rights_bitand_color() {
-        assert_eq!(CastlingRights::AnyCastling & Color::White, CastlingRights::WhiteCastling);
-        assert_eq!(CastlingRights::AnyCastling & Color::Black, CastlingRights::BlackCastling);
+        assert_eq!(
+            CastlingRights::AnyCastling & Color::White,
+            CastlingRights::WhiteCastling
+        );
+        assert_eq!(
+            CastlingRights::AnyCastling & Color::Black,
+            CastlingRights::BlackCastling
+        );
     }
 
     #[test]
     fn test_color_bitand_castling_rights() {
-        assert_eq!(Color::White & CastlingRights::AnyCastling, CastlingRights::WhiteCastling);
-        assert_eq!(Color::Black & CastlingRights::AnyCastling, CastlingRights::BlackCastling);
+        assert_eq!(
+            Color::White & CastlingRights::AnyCastling,
+            CastlingRights::WhiteCastling
+        );
+        assert_eq!(
+            Color::Black & CastlingRights::AnyCastling,
+            CastlingRights::BlackCastling
+        );
     }
 
     #[test]

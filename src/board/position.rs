@@ -1,6 +1,8 @@
+use crate::board::bitboard::more_than_one;
+use crate::board::bitboard as bb;
+use crate::board::bitboard::pawn_attacks_bb;
 use crate::board::bitboard::RANK1BB;
 use crate::board::bitboard::RANK8BB;
-use crate::board::bitboard as bb;
 use crate::board::position_macros;
 use crate::board::zobrist;
 use crate::board::zobrist::ENPASSANT;
@@ -337,7 +339,7 @@ impl Position {
         }
 
         return (self.blockers_for_king(us) & from) == 0
-            || bb::alligned(from, to, self.square(us, PieceType::King))
+            || bb::alligned(from, to, self.square(us, PieceType::King));
     }
 
     pub fn pseudo_legal(&self, m: Move) -> bool {
@@ -347,22 +349,43 @@ impl Position {
         let from: Square = m.from_sq();
         let to: Square = m.to_sq();
         let pc: Piece = self.moved_piece(m);
-        
+
         if m.type_of() != MoveType::Normal {
             todo!()
         }
 
         if pc != Piece::NoPiece || pc.color() != us {
-            return false
+            return false;
         }
 
         if pieces_by_color_and_pt!(self, us, PieceType::AllPieces) & to != 0 {
-            return false
+            return false;
         }
 
         if pc.type_of() == PieceType::Pawn {
             if (RANK8BB | RANK1BB) & to != 0 {
-                return false
+                return false;
+            }
+            if (bb::get_pawn_attacks_bb(us, from)
+                & pieces_by_color_and_pt!(self, !us, PieceType::AllPieces)
+                & to
+                == 0)
+                && !(from + pawn_push(us) == to && self.empty(to))
+                && !(from + pawn_push(us) * 2 == to && self.empty(to))
+                && !(relative_rank_of_square(us, from) == Rank::Rank2 && self.empty(to) && self.empty(to - pawn_push(us)))
+            {
+                return false;
+            }
+        }
+
+        if self.checkers() != 0 {
+            if pc.type_of() != PieceType::King {
+                if more_than_one(self.checkers()) {
+                    return false
+                }
+                if bb::between_bb(self.square(us, PieceType::King), self.checkers().trailing_zeros()) & to == 0 {
+                    return false
+                }
             }
         }
         true
