@@ -383,14 +383,25 @@ impl Position {
                 if more_than_one(self.checkers()) {
                     return false
                 }
-                if bb::between_bb(self.square(us, PieceType::King), self.checkers().trailing_zeros()) & to == 0 {
+                if bb::between_bb(self.square(us, PieceType::King), Square::new_from_n(self.checkers().trailing_zeros() as i32)) & to == 0 {
                     return false
                 }
+            }else if self.attackers_to(to, pieces_of_types!(self, PieceType::AllPieces) ^ from) & pieces_by_color_and_pt!(self, !us, PieceType::AllPieces) != 0 {
+                return false
             }
+
         }
         true
     }
 
+    pub fn gives_check(&self, m: Move) {
+        assert!(m.is_ok());
+        assert!(self.moved_piece(m).color() == self.side_to_move);
+        let from: Square = m.from_sq(); 
+        let to: Square = m.to_sq(); 
+
+        
+    }
     #[inline]
     fn square(&self, c: Color, pt: PieceType) -> Square {
         return Square::new_from_n(pieces_by_color_and_pt!(&self, c, pt).trailing_zeros() as i32);
