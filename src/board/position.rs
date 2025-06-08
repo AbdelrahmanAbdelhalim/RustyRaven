@@ -1,10 +1,12 @@
-use crate::board::bitboard::more_than_one;
 use crate::board::bitboard as bb;
+use crate::board::bitboard::alligned;
+use crate::board::bitboard::more_than_one;
 use crate::board::bitboard::pawn_attacks_bb;
 use crate::board::bitboard::RANK1BB;
 use crate::board::bitboard::RANK8BB;
 use crate::board::position_macros;
 use crate::board::zobrist;
+use crate::board::zobrist::CASTLING;
 use crate::board::zobrist::ENPASSANT;
 use crate::misc::*;
 use crate::types::*;
@@ -44,6 +46,12 @@ macro_rules! pieces_by_color_and_pt {
     };
 }
 
+macro_rules! all_pieces {
+    ($pos: expr) => {
+        pieces_of_types!($pos, PieceType::AllPieces)
+    };
+}
+
 #[inline]
 fn H1(h: Key) -> i32 {
     (h & 0x1fff) as i32
@@ -73,11 +81,21 @@ struct StateInfo {
     captured_piece: Piece,
     repition: i32,
 }
-
+impl StateInfo {
+    pub fn copy_from_old_to_new(&self, newst: &mut StateInfo) {
+        newst.material_key = self.material_key;
+        newst.pawn_key = self.pawn_key;
+        newst.non_pawn_material = self.non_pawn_material.clone();
+        newst.castling_rights = self.castling_rights;
+        newst.rule_50 = self.rule_50;
+        newst.plies_from_null = self.plies_from_null;
+        newst.ep_square = self.ep_square;
+        newst.state_idx = self.state_idx;
+    }
+}
 #[derive(Default)]
 struct StateStack {
     states: Vec<StateInfo>,
-    current: usize,
 }
 
 impl StateStack {
@@ -103,29 +121,17 @@ impl StateStack {
                 };
                 MAX_PLY
             ],
-            current: 0,
         }
     }
 
     #[inline(always)]
-    fn push(&mut self) -> &mut StateInfo {
-        self.current += 1;
-        &mut self.states[self.current - 1]
+    fn push(&mut self, newst: StateInfo) {
+        self.states.push(newst);
     }
 
     #[inline(always)]
     fn pop(&mut self) {
-        self.current -= 1;
-    }
-
-    #[inline(always)]
-    fn current(&self) -> &StateInfo {
-        &self.states[self.current - 1]
-    }
-
-    #[inline(always)]
-    fn current_mut(&mut self) -> &mut StateInfo {
-        &mut self.states[self.current - 1]
+        self.states.pop();
     }
 }
 
@@ -140,7 +146,7 @@ struct Position {
     state_stack: StateStack,
     game_ply: i32,
     side_to_move: Color,
-    st: StateInfo,
+    state_idx: usize,
 }
 
 impl Position {
@@ -150,7 +156,6 @@ impl Position {
     // }
     fn default() -> Self {
         Self {
-            st: StateInfo::default(),
             board: [Piece::NoPiece; SQNB],
             by_type_bb: [0; PTNB],
             by_color_bb: [0; COLORNB],
@@ -161,10 +166,20 @@ impl Position {
             state_stack: StateStack::default(),
             game_ply: 0,
             side_to_move: Color::White,
+            state_idx: 0,
         }
     }
 
-    pub fn set_castling_right(&mut self, c: Color, rfrom: Square) {
+    pub fn st<'a>(&self, state_stack: &'a StateStack) -> &'a StateInfo {
+        let idx: usize = self.state_idx;
+        return &state_stack.states[idx];
+    }
+
+    pub fn st_mut<'a>(&self, state_stack: &'a mut StateStack) -> &'a mut StateInfo {
+        let idx: usize = self.state_idx;
+        return &mut state_stack.states[idx];
+    }
+    pub fn set_castling_right(&mut self, c: Color, rfrom: Square, state_stack: &mut StateStack) {
         let kfrom = self.square(c, PieceType::King);
         let side;
         if kfrom < rfrom {
@@ -173,7 +188,7 @@ impl Position {
             side = CastlingRights::QueenSide;
         }
         let cr = c & side;
-        self.st.castling_rights |= cr;
+        self.st_mut(state_stack).castling_rights |= cr;
         self.castling_rights_mask[kfrom as usize] |= cr as i32;
         self.castling_rights_mask[rfrom as usize] |= cr as i32;
         self.castling_rook_square[cr as usize] = rfrom;
@@ -204,37 +219,31 @@ impl Position {
         }
     }
 
-    pub fn set_check_info(&mut self) {
-        self.update_sliders_blockers(Color::White);
-        self.update_sliders_blockers(Color::Black);
+    pub fn set_check_info(&mut self, state_stack: &mut StateStack) {
+        self.update_sliders_blockers(Color::White, state_stack);
+        self.update_sliders_blockers(Color::Black, state_stack);
 
         let side_to_move = self.side_to_move;
         let ksq: Square = self.square(!side_to_move, PieceType::King);
 
-        self.st.check_squares[PieceType::Pawn as usize] =
+        self.st_mut(state_stack).check_squares[PieceType::Pawn as usize] =
             bb::get_pawn_attacks_bb(!side_to_move, ksq);
-        self.st.check_squares[PieceType::Knight as usize] =
+        self.st_mut(state_stack).check_squares[PieceType::Knight as usize] =
             bb::get_pseudo_attacks(PieceType::Knight, ksq);
-        self.st.check_squares[PieceType::Bishop as usize] = bb::attacks_bb(
-            PieceType::Bishop,
-            ksq,
-            pieces_of_types!(self, PieceType::AllPieces),
-        );
-        self.st.check_squares[PieceType::Rook as usize] = bb::attacks_bb(
-            PieceType::Rook,
-            ksq,
-            pieces_of_types!(self, PieceType::AllPieces),
-        );
-        self.st.check_squares[PieceType::Queen as usize] = self.st.check_squares
+        self.st_mut(state_stack).check_squares[PieceType::Bishop as usize] =
+            bb::attacks_bb(PieceType::Bishop, ksq, all_pieces!(self));
+        self.st_mut(state_stack).check_squares[PieceType::Rook as usize] =
+            bb::attacks_bb(PieceType::Rook, ksq, all_pieces!(self));
+        self.st_mut(state_stack).check_squares[PieceType::Queen as usize] = self.st_mut(state_stack).check_squares
             [PieceType::Bishop as usize]
-            | self.st.check_squares[PieceType::Rook as usize];
-        self.st.check_squares[PieceType::King as usize] = 0;
+            | self.st_mut(state_stack).check_squares[PieceType::Rook as usize];
+        self.st_mut(state_stack).check_squares[PieceType::King as usize] = 0;
     }
 
-    pub fn update_sliders_blockers(&mut self, c: Color) {
+    pub fn update_sliders_blockers(&mut self, c: Color, state_stack: &mut StateStack) {
         let ksq: Square = self.square(c, PieceType::King);
-        self.st.blockers_for_king[c as usize] = 0;
-        self.st.pinners[!c as usize] = 0;
+        self.st_mut(state_stack).blockers_for_king[c as usize] = 0;
+        self.st_mut(state_stack).pinners[!c as usize] = 0;
 
         let mut snipers: Bitboard = (pseudo_attacks_bb(PieceType::Rook, ksq)
             & pieces_of_types!(&self, PieceType::Queen, PieceType::Rook))
@@ -249,31 +258,26 @@ impl Position {
             let b: Bitboard = bb::between_bb(snipers_sq, ksq);
 
             if b != 0 && bb::more_than_one(b) {
-                self.st.blockers_for_king[c as usize] |= b;
+                self.st_mut(state_stack).blockers_for_king[c as usize] |= b;
                 if b & pieces_by_color_and_pt!(self, c, PieceType::AllPieces) != 0 {
-                    self.st.pinners[!c as usize] |= snipers_sq;
+                    self.st_mut(state_stack).pinners[!c as usize] |= snipers_sq;
                 }
             }
         }
     }
 
-    pub fn set_state(&mut self) {
+    pub fn set_state(&mut self, state_stack: &mut StateStack) {
         if let Some(nopawns) = zobrist::NOPAWNS.get() {
-            self.st.pawn_key = *nopawns;
+            self.st_mut(state_stack).pawn_key = *nopawns;
         } else {
             panic!("Attempted to access zobrist - nopawns before initialization");
         }
-        self.st.key = 0;
-        self.st.material_key = 0;
-        self.st.non_pawn_material[Color::White as usize] = 0;
-        self.st.non_pawn_material[Color::Black as usize] = 0;
+        self.st_mut(state_stack).key = 0;
+        self.st_mut(state_stack).material_key = 0;
+        self.st_mut(state_stack).non_pawn_material[Color::White as usize] = 0;
+        self.st_mut(state_stack).non_pawn_material[Color::Black as usize] = 0;
 
-        self.set_check_info();
-    }
-
-    #[inline(always)]
-    fn st(&self) -> &StateInfo {
-        self.state_stack.current()
+        self.set_check_info(state_stack);
     }
 
     pub fn attackers_to(&self, s: Square, occupied: Bitboard) -> Bitboard {
@@ -290,7 +294,7 @@ impl Position {
             | bb::get_pseudo_attacks(PieceType::King, s) & pieces_of_types!(self, PieceType::King);
     }
 
-    pub fn legal(self, m: Move) -> bool {
+    pub fn legal(self, m: Move, state_stack: &StateStack) -> bool {
         assert!(&m.is_ok());
         let us: Color = self.side_to_move;
         let from = m.from_sq();
@@ -301,8 +305,7 @@ impl Position {
         if m.type_of() == MoveType::EnPassant {
             let ksq: Square = self.square(us, PieceType::King);
             let capsq: Square = to - pawn_push(us);
-            let occupied: Bitboard =
-                (pieces_of_types!(self, PieceType::AllPieces) ^ from ^ capsq) | to;
+            let occupied: Bitboard = (all_pieces!(self) ^ from ^ capsq) | to;
             return false;
         }
 
@@ -322,7 +325,7 @@ impl Position {
 
             let mut s = to;
             while s != from {
-                if self.attackers_to(s, pieces_of_types!(self, PieceType::AllPieces))
+                if self.attackers_to(s, all_pieces!(self))
                     & pieces_by_color_and_pt!(self, !us, PieceType::AllPieces)
                     != 0
                 {
@@ -333,16 +336,16 @@ impl Position {
         }
 
         if self.piece_on(from).type_of() == PieceType::King {
-            return self.attackers_to(to, pieces_of_types!(self, PieceType::AllPieces) ^ from)
+            return self.attackers_to(to, all_pieces!(self) ^ from)
                 & pieces_by_color_and_pt!(self, c, PieceType::AllPieces)
                 == 0;
         }
 
-        return (self.blockers_for_king(us) & from) == 0
+        return (self.blockers_for_king(us, state_stack) & from) == 0
             || bb::alligned(from, to, self.square(us, PieceType::King));
     }
 
-    pub fn pseudo_legal(&self, m: Move) -> bool {
+    pub fn pseudo_legal(&self, m: Move, state_stack: &StateStack) -> bool {
         assert!(m.is_ok());
 
         let us: Color = self.side_to_move;
@@ -372,45 +375,119 @@ impl Position {
                 == 0)
                 && !(from + pawn_push(us) == to && self.empty(to))
                 && !(from + pawn_push(us) * 2 == to && self.empty(to))
-                && !(relative_rank_of_square(us, from) == Rank::Rank2 && self.empty(to) && self.empty(to - pawn_push(us)))
+                && !(relative_rank_of_square(us, from) == Rank::Rank2
+                    && self.empty(to)
+                    && self.empty(to - pawn_push(us)))
             {
                 return false;
             }
         }
 
-        if self.checkers() != 0 {
+        if self.checkers(state_stack) != 0 {
             if pc.type_of() != PieceType::King {
-                if more_than_one(self.checkers()) {
-                    return false
+                if more_than_one(self.checkers(state_stack)) {
+                    return false;
                 }
-                if bb::between_bb(self.square(us, PieceType::King), Square::new_from_n(self.checkers().trailing_zeros() as i32)) & to == 0 {
-                    return false
+                if bb::between_bb(
+                    self.square(us, PieceType::King),
+                    Square::new_from_n(self.checkers(state_stack).trailing_zeros() as i32),
+                ) & to
+                    == 0
+                {
+                    return false;
                 }
-            }else if self.attackers_to(to, pieces_of_types!(self, PieceType::AllPieces) ^ from) & pieces_by_color_and_pt!(self, !us, PieceType::AllPieces) != 0 {
-                return false
+            } else if self.attackers_to(to, all_pieces!(self) ^ from)
+                & pieces_by_color_and_pt!(self, !us, PieceType::AllPieces)
+                != 0
+            {
+                return false;
             }
-
         }
         true
     }
 
-    pub fn gives_check(&self, m: Move) {
+    pub fn gives_check(&self, m: Move, state_stack: &StateStack) -> bool {
         assert!(m.is_ok());
         assert!(self.moved_piece(m).color() == self.side_to_move);
-        let from: Square = m.from_sq(); 
-        let to: Square = m.to_sq(); 
+        let from: Square = m.from_sq();
+        let to: Square = m.to_sq();
 
-        
+        // Direct Check
+        if self.check_squares(self.piece_on(from).type_of(), state_stack) & to != 0 {
+            return true;
+        }
+
+        // Discovered Check
+        if self.blockers_for_king(!self.side_to_move, state_stack) & from != 0 {
+            return !alligned(from, to, self.square(!self.side_to_move, PieceType::King))
+                || m.type_of() == MoveType::Castling;
+        }
+
+        match m.type_of() {
+            MoveType::Normal => return false,
+            MoveType::Promotion => {
+                return attacks_bb(m.promotion_type(), to, all_pieces!(self) ^ from)
+                    & self.square(!self.side_to_move, PieceType::King)
+                    != 0
+            }
+            MoveType::EnPassant => {
+                let capsq: Square = make_square(to.file_of() as usize, from.rank_of() as usize);
+                let b: Bitboard = all_pieces!(self) ^ from ^ capsq | to;
+                return (attacks_bb(
+                    PieceType::Rook,
+                    self.square(!self.side_to_move, PieceType::King),
+                    b,
+                ) & pieces_by_color_and_pt!(
+                    self,
+                    !self.side_to_move,
+                    PieceType::Queen,
+                    PieceType::Rook
+                )) | (attacks_bb(
+                    PieceType::Bishop,
+                    self.square(!self.side_to_move, PieceType::King),
+                    b,
+                )) & pieces_by_color_and_pt!(
+                    self,
+                    self.side_to_move,
+                    PieceType::Queen,
+                    PieceType::Bishop
+                ) != 0;
+            }
+            MoveType::Castling => {
+                let rto: Square = if to > from {
+                    Square::SqF1
+                } else {
+                    Square::SqD1
+                }
+                .relative_square(self.side_to_move);
+                return self.check_squares(PieceType::Rook, state_stack) & rto != 0;
+            }
+        }
+    }
+
+    pub fn do_move(
+        &mut self,
+        state_stack: &mut StateStack,
+        m: Move,
+        new_state: &mut StateInfo,
+        gives_check: bool,
+    ) {
+        assert!(m.is_ok());
+        let zobrist_side = zobrist::get_zobrist_side();
+        let k: Key = zobrist_side ^ self.st(state_stack).key;
+
+        //Partial copy of some of the fields of the old state. The rest is recomputed anyway
+        self.st(state_stack).copy_from_old_to_new(new_state);
+        state_stack.push(*new_state);
     }
     #[inline]
     fn square(&self, c: Color, pt: PieceType) -> Square {
         return Square::new_from_n(pieces_by_color_and_pt!(&self, c, pt).trailing_zeros() as i32);
     }
     #[inline(always)]
-    fn st_mut(&mut self) -> &mut StateInfo {
-        self.state_stack.current_mut()
-    }
-
+    // fn st_mut(&mut self) -> &mut StateInfo {
+    //     self.state_stack.current_mut()
+    // }
     #[inline]
     pub fn side_to_move(&self) -> Color {
         self.side_to_move
@@ -442,48 +519,48 @@ impl Position {
     }
 
     #[inline]
-    pub fn ep_square(&self) -> Square {
-        self.st().ep_square
+    pub fn ep_square(&self, state_stack: &StateStack) -> Square {
+        self.st(state_stack).ep_square
     }
 
     #[inline]
-    pub fn can_castle(&self, cr: CastlingRights) -> bool {
-        self.st().castling_rights as i32 & cr as i32 != 0
+    pub fn can_castle(&self, cr: CastlingRights, state_stack: &StateStack) -> bool {
+        self.st(state_stack).castling_rights as i32 & cr as i32 != 0
     }
 
     #[inline]
-    pub fn checkers(&self) -> Bitboard {
-        self.st().checkers_bb
+    pub fn checkers(&self, state_stack: &StateStack) -> Bitboard {
+        self.st(state_stack).checkers_bb
     }
 
     #[inline]
-    pub fn blockers_for_king(&self, c: Color) -> Bitboard {
-        self.st().blockers_for_king[c as usize]
+    pub fn blockers_for_king(&self, c: Color, state_stack: &StateStack) -> Bitboard {
+        self.st(state_stack).blockers_for_king[c as usize]
     }
 
     #[inline]
-    pub fn pinners(&self, c: Color) -> Bitboard {
-        self.st().pinners[c as usize]
+    pub fn pinners(&self, c: Color, state_stack: &StateStack) -> Bitboard {
+        self.st(state_stack).pinners[c as usize]
     }
 
     #[inline]
-    pub fn check_squares(&self, pt: PieceType) -> Bitboard {
-        self.st().check_squares[pt as usize]
+    pub fn check_squares(&self, pt: PieceType, state_stack: &StateStack) -> Bitboard {
+        self.st(state_stack).check_squares[pt as usize]
     }
 
     #[inline]
-    pub fn pawn_key(&self) -> Key {
-        self.st().pawn_key
+    pub fn pawn_key(&self, state_stack: &StateStack) -> Key {
+        self.st(state_stack).pawn_key
     }
 
     #[inline]
-    pub fn material_key(&self) -> Key {
-        self.st().material_key
+    pub fn material_key(&self, state_stack: &StateStack) -> Key {
+        self.st(state_stack).material_key
     }
 
     #[inline]
-    pub fn non_pawn_material(&self, c: Color) -> Value {
-        self.st().non_pawn_material[c as usize]
+    pub fn non_pawn_material(&self, c: Color, state_stack: &StateStack) -> Value {
+        self.st(state_stack).non_pawn_material[c as usize]
     }
 
     #[inline]
@@ -492,13 +569,13 @@ impl Position {
     }
 
     #[inline]
-    pub fn rule50_count(&self) -> i32 {
-        self.st().rule_50
+    pub fn rule50_count(&self, state_stack: &StateStack) -> i32 {
+        self.st(state_stack).rule_50
     }
 
     #[inline]
-    pub fn captured_piece(&self) -> Piece {
-        self.st().captured_piece
+    pub fn captured_piece(&self, state_stack: &StateStack) -> Piece {
+        self.st(state_stack).captured_piece
     }
 
     pub fn put_piece(&mut self, pc: Piece, s: Square) {
