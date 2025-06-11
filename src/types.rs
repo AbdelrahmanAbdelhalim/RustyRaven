@@ -59,6 +59,31 @@ pub const RNB: usize = 8;
 pub const SQA1: usize = Square::SqA1 as usize;
 pub const SQH8: usize = Square::SqA1 as usize;
 
+pub const PawnValue: Value = 208;
+pub const KnightValue: Value = 781;
+pub const BishopValue: Value = 825;
+pub const RookValue: Value = 1276;
+pub const QueenValue: Value = 2538;
+
+pub const PIECEVALUE: [Value; PNB] = [
+    VALUE_ZERO,
+    PawnValue,
+    KnightValue,
+    BishopValue,
+    RookValue,
+    QueenValue,
+    VALUE_ZERO,
+    VALUE_ZERO,
+    VALUE_ZERO,
+    PawnValue,
+    KnightValue,
+    BishopValue,
+    RookValue,
+    QueenValue,
+    VALUE_ZERO,
+    VALUE_ZERO,
+];
+
 #[repr(i32)]
 #[derive(Debug, PartialEq, Copy, Clone, Default)]
 pub enum Color {
@@ -219,11 +244,11 @@ impl Direction {
             1 => Direction::East,
             -8 => Direction::South,
             -1 => Direction::West,
-            7 => Direction::NorthWest, 
+            7 => Direction::NorthWest,
             9 => Direction::NorthEast,
             -7 => Direction::SouthEast,
             -9 => Direction::SouthWest,
-            _ => panic!("Invalid Direction Nunmber")
+            _ => panic!("Invalid Direction Nunmber"),
         }
     }
 }
@@ -271,7 +296,6 @@ impl Add<Direction> for Direction {
     }
 }
 
-
 //Overloading subtraction between two directions
 impl Sub<Direction> for Direction {
     type Output = Self;
@@ -285,7 +309,7 @@ impl Mul<i32> for Direction {
     type Output = i32;
     fn mul(self, rhs: i32) -> i32 {
         let val = self.to_num();
-        return rhs * val
+        return rhs * val;
     }
 }
 
@@ -538,11 +562,6 @@ pub enum MoveType {
     Castling = 3 << 14,
 }
 
-
-
-
-
-
 //Overloading addition between two directions
 
 //Overloading Not for Colors
@@ -556,8 +575,6 @@ impl Not for Color {
         }
     }
 }
-
-
 
 impl BitAnd<Square> for Bitboard {
     type Output = Bitboard;
@@ -590,8 +607,6 @@ impl BitXorAssign<Square> for Bitboard {
         *self = result;
     }
 }
-
-
 
 //Overload BitAnd Between Color and Castling Rights
 impl BitAnd<Color> for CastlingRights {

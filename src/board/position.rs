@@ -66,12 +66,14 @@ struct StateInfo {
     //Copied when making a move
     material_key: Key,
     pawn_key: Key,
+    major_piece_key: Key,
+    minor_piece_key: Key,
+    non_pawn_key: [Key; COLORNB],
     non_pawn_material: [Value; COLORNB],
     castling_rights: CastlingRights,
     rule_50: i32,
     plies_from_null: i32,
     ep_square: Square,
-    state_idx: usize,
     //Not copied when making a move
     key: Key,
     checkers_bb: Bitboard,
@@ -90,7 +92,6 @@ impl StateInfo {
         newst.rule_50 = self.rule_50;
         newst.plies_from_null = self.plies_from_null;
         newst.ep_square = self.ep_square;
-        newst.state_idx = self.state_idx;
     }
 }
 #[derive(Default)]
@@ -100,28 +101,7 @@ struct StateStack {
 
 impl StateStack {
     fn new() -> Self {
-        Self {
-            states: vec![
-                StateInfo {
-                    material_key: 0,
-                    pawn_key: 0,
-                    non_pawn_material: [0; COLORNB],
-                    castling_rights: CastlingRights::AnyCastling,
-                    rule_50: 0,
-                    plies_from_null: 0,
-                    ep_square: Square::SqNone,
-                    state_idx: 0,
-                    key: 0,
-                    checkers_bb: 0,
-                    blockers_for_king: [0; COLORNB],
-                    pinners: [0; COLORNB],
-                    check_squares: [0; PIECE_TYPE_NB],
-                    captured_piece: Piece::NoPiece,
-                    repition: 0,
-                };
-                MAX_PLY
-            ],
-        }
+        Self { states: vec![] }
     }
 
     #[inline(always)]
@@ -234,9 +214,9 @@ impl Position {
             bb::attacks_bb(PieceType::Bishop, ksq, all_pieces!(self));
         self.st_mut(state_stack).check_squares[PieceType::Rook as usize] =
             bb::attacks_bb(PieceType::Rook, ksq, all_pieces!(self));
-        self.st_mut(state_stack).check_squares[PieceType::Queen as usize] = self.st_mut(state_stack).check_squares
-            [PieceType::Bishop as usize]
-            | self.st_mut(state_stack).check_squares[PieceType::Rook as usize];
+        self.st_mut(state_stack).check_squares[PieceType::Queen as usize] =
+            self.st_mut(state_stack).check_squares[PieceType::Bishop as usize]
+                | self.st_mut(state_stack).check_squares[PieceType::Rook as usize];
         self.st_mut(state_stack).check_squares[PieceType::King as usize] = 0;
     }
 
@@ -474,11 +454,61 @@ impl Position {
     ) {
         assert!(m.is_ok());
         let zobrist_side = zobrist::get_zobrist_side();
-        let k: Key = zobrist_side ^ self.st(state_stack).key;
+        let mut k: Key = zobrist_side ^ self.st(state_stack).key;
 
         //Partial copy of some of the fields of the old state. The rest is recomputed anyway
         self.st(state_stack).copy_from_old_to_new(new_state);
+        self.state_idx = state_stack.states.len();
         state_stack.push(*new_state);
+        self.game_ply += 1;
+        self.st_mut(state_stack).rule_50 += 1;
+        self.st_mut(state_stack).plies_from_null += 1;
+
+        let us: Color = self.side_to_move;
+        let them: Color = !us;
+        let from: Square = m.from_sq();
+        let to: Square = m.to_sq();
+        let pc: Piece = self.piece_on(from);
+
+        let captured: Piece = if m.type_of() == MoveType::EnPassant {
+            make_piece(them, PieceType::Pawn)
+        } else {
+            self.piece_on(to)
+        };
+
+        assert!(pc.color() == us);
+        assert!(captured.type_of() != PieceType::King);
+
+        if m.type_of() == MoveType::Castling {
+            todo!()
+        }
+
+        if captured != Piece::NoPiece {
+            let zobrist_psq = zobrist::get_zobrist_psq();
+            let mut capsq: Square = to;
+            if captured.type_of() == PieceType::Pawn {
+                capsq -= pawn_push(us);
+                let zobrist_psq = zobrist::get_zobrist_psq();
+                self.st_mut(state_stack).pawn_key ^= zobrist_psq[captured as usize][capsq as usize];
+            } else {
+                self.st_mut(state_stack).non_pawn_material[them as usize] -=
+                    PIECEVALUE[captured as usize];
+                self.st_mut(state_stack).non_pawn_key[them as usize] ^=
+                    zobrist_psq[captured as usize][capsq as usize];
+                if pc.type_of() == PieceType::Queen || pc.type_of() == PieceType::Rook {
+                    self.st_mut(state_stack).major_piece_key ^=
+                        zobrist_psq[captured as usize][capsq as usize];
+                } else {
+                    self.st_mut(state_stack).minor_piece_key ^=
+                        zobrist_psq[captured as usize][capsq as usize];
+                }
+            }
+            self.remove_piece(capsq);
+            k ^= zobrist_psq[captured as usize][capsq as usize];
+            self.st_mut(state_stack).material_key ^=
+                zobrist_psq[captured as usize][self.piece_count[captured as usize] as usize];
+            self.st_mut(state_stack).rule_50 = 0;
+        }
     }
     #[inline]
     fn square(&self, c: Color, pt: PieceType) -> Square {
