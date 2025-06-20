@@ -11,6 +11,7 @@ use crate::board::zobrist::ENPASSANT;
 use crate::misc::*;
 use crate::types::*;
 use std::fmt;
+use std::os::macos::raw::stat;
 use std::sync::OnceLock;
 use std::vec::Vec;
 
@@ -20,7 +21,7 @@ use super::bitboard::pseudo_attacks_bb;
 use super::bitboard::BETWEEN_BB;
 
 const PIECE_TYPE_NB: usize = PieceType::PieceTypeNb as usize;
-const PIECE_TO_CHAR: &str = " PNBRQK pnbrqk";
+const PIECE_TO_CHAR: &str = " PNBRQK  pnbrqk";
 const MAX_PLY: usize = 246; // Maximum search depth
 
 pub static CUCKOO: OnceLock<[Key; 8192]> = OnceLock::new();
@@ -51,7 +52,20 @@ macro_rules! all_pieces {
         pieces_of_types!($pos, PieceType::AllPieces)
     };
 }
-
+const pieces: [Piece; 12] = [
+    Piece::WPawn,
+    Piece::WKnight,
+    Piece::WBishop,
+    Piece::WRook,
+    Piece::WQueen,
+    Piece::WKing,
+    Piece::BPawn,
+    Piece::BKnight,
+    Piece::BBishop,
+    Piece::BRook,
+    Piece::BQueen,
+    Piece::BKing,
+];
 #[inline]
 fn H1(h: Key) -> i32 {
     (h & 0x1fff) as i32
@@ -120,7 +134,7 @@ struct Position {
     by_type_bb: [Bitboard; PTNB],
     by_color_bb: [Bitboard; COLORNB],
     piece_count: [i32; PNB],
-    castling_rights_mask: [i32; SQNB],
+    castling_rights_mask: [CastlingRights; SQNB],
     castling_rook_square: [Square; CRNB],
     castling_path: [Bitboard; CRNB],
     state_stack: StateStack,
@@ -140,7 +154,7 @@ impl Position {
             by_type_bb: [0; PTNB],
             by_color_bb: [0; COLORNB],
             piece_count: [64; PNB],
-            castling_rights_mask: [0; SQNB],
+            castling_rights_mask: [CastlingRights::new_from_n(0); SQNB],
             castling_rook_square: [Square::default(); CRNB],
             castling_path: [0; CRNB],
             state_stack: StateStack::default(),
@@ -169,8 +183,8 @@ impl Position {
         }
         let cr = c & side;
         self.st_mut(state_stack).castling_rights |= cr;
-        self.castling_rights_mask[kfrom as usize] |= cr as i32;
-        self.castling_rights_mask[rfrom as usize] |= cr as i32;
+        self.castling_rights_mask[kfrom as usize] |= cr;
+        self.castling_rights_mask[rfrom as usize] |= cr;
         self.castling_rook_square[cr as usize] = rfrom;
 
         let mut kto: Square;
@@ -455,6 +469,8 @@ impl Position {
         assert!(m.is_ok());
         let zobrist_side = zobrist::get_zobrist_side();
         let mut k: Key = zobrist_side ^ self.st(state_stack).key;
+        let zobrist_psq = zobrist::get_zobrist_psq();
+        let zobrist_enpassant = zobrist::get_zobrist_enpassant();
 
         //Partial copy of some of the fields of the old state. The rest is recomputed anyway
         self.st(state_stack).copy_from_old_to_new(new_state);
@@ -477,6 +493,7 @@ impl Position {
         };
 
         assert!(pc.color() == us);
+        //debugging here
         assert!(captured.type_of() != PieceType::King);
 
         if m.type_of() == MoveType::Castling {
@@ -484,7 +501,6 @@ impl Position {
         }
 
         if captured != Piece::NoPiece {
-            let zobrist_psq = zobrist::get_zobrist_psq();
             let mut capsq: Square = to;
             if captured.type_of() == PieceType::Pawn {
                 capsq -= pawn_push(us);
@@ -508,6 +524,110 @@ impl Position {
             self.st_mut(state_stack).material_key ^=
                 zobrist_psq[captured as usize][self.piece_count[captured as usize] as usize];
             self.st_mut(state_stack).rule_50 = 0;
+        }
+        k ^= zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+
+        if self.st(state_stack).ep_square != Square::SqNone {
+            k ^= zobrist_enpassant[self.st(state_stack).ep_square.file_of() as usize];
+            self.st_mut(state_stack).ep_square = Square::SqNone;
+        }
+        if self.st(state_stack).castling_rights != CastlingRights::NoCastling
+            && self.castling_rights_mask[from as usize] | self.castling_rights_mask[to as usize]
+                != CastlingRights::NoCastling
+        {
+            let zobrist_castling = zobrist::get_zobrist_castling();
+            k ^= zobrist_castling[self.st(state_stack).castling_rights as usize];
+            self.st_mut(state_stack).castling_rights &= !(self.castling_rights_mask[from as usize]
+                | self.castling_rights_mask[to as usize]);
+            k ^= zobrist_castling[self.st(&state_stack).castling_rights as usize];
+        }
+
+        if m.type_of() != MoveType::Castling {
+            self.move_piece(from, to);
+        }
+
+        if pc.type_of() == PieceType::Pawn {
+            if to as i32 ^ from as i32 == 16
+            // todo: I Don't like the cast to u64 when calling pawn_push here
+                && (pawn_attacks_bb((to - pawn_push(us)) as u64, us)
+                    & pieces_by_color_and_pt!(self, them, PieceType::Pawn)
+                    != 0)
+            {
+                self.st_mut(state_stack).ep_square = to - pawn_push(us);
+                k ^= zobrist_enpassant[self.st(&state_stack).ep_square.file_of() as usize];
+            } else if m.type_of() == MoveType::Promotion {
+                let promotion: Piece = make_piece(us, m.promotion_type());
+                let promotion_type: PieceType = promotion.type_of();
+
+                //Remove the Pawn and add the New Piece
+                self.remove_piece(to);
+                self.put_piece(promotion, to);
+
+                //Update the Hash Keys
+                k ^= zobrist_psq[pc as usize][to as usize]
+                    ^ zobrist_psq[promotion as usize][to as usize];
+                self.st_mut(state_stack).pawn_key ^= zobrist_psq[pc as usize][to as usize];
+
+                self.st_mut(state_stack).material_key ^= zobrist_psq[promotion as usize]
+                    [self.piece_count[promotion as usize] as usize - 1]
+                    ^ zobrist_psq[pc as usize][self.piece_count[pc as usize] as usize];
+                if promotion_type == PieceType::Queen || promotion_type == PieceType::Rook {
+                    self.st_mut(state_stack).major_piece_key ^=
+                        zobrist_psq[promotion as usize][to as usize];
+                } else {
+                    self.st_mut(state_stack).minor_piece_key ^=
+                        zobrist_psq[promotion as usize][to as usize];
+                }
+
+                self.st_mut(state_stack).non_pawn_material[us as usize] +=
+                    PIECEVALUE[promotion as usize];
+            }
+
+            self.st_mut(state_stack).pawn_key ^=
+                zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+
+            self.st_mut(state_stack).rule_50 = 0;
+        } else {
+            self.st_mut(state_stack).non_pawn_key[us as usize] ^=
+                zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+            if pc.type_of() == PieceType::King {
+                self.st_mut(state_stack).major_piece_key ^=
+                    zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+
+                self.st_mut(state_stack).minor_piece_key ^=
+                    zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+            } else if pc.type_of() == PieceType::Queen || pc.type_of() == PieceType::Rook {
+                self.st_mut(state_stack).major_piece_key ^=
+                    zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+            } else {
+                self.st_mut(state_stack).minor_piece_key ^=
+                    zobrist_psq[pc as usize][from as usize] ^ zobrist_psq[pc as usize][to as usize];
+            }
+        }
+        self.st_mut(state_stack).captured_piece = captured;
+        self.st_mut(state_stack).key = k;
+
+        self.st_mut(state_stack).checkers_bb = if gives_check {
+            self.attackers_to(
+                self.square(them, PieceType::King),
+                pieces_by_color_and_pt!(self, us, PieceType::AllPieces),
+            )
+        } else {
+            0
+        };
+        self.side_to_move = !self.side_to_move;
+        //todo next:: test this and all its inner functions
+        self.set_check_info(state_stack);
+
+        self.st_mut(state_stack).repition = 0;
+
+        let end = std::cmp::min(
+            self.st(state_stack).rule_50,
+            self.st(state_stack).plies_from_null,
+        );
+
+        if end >= 4 {
+            todo!()
         }
     }
     #[inline]
@@ -611,9 +731,9 @@ impl Position {
     pub fn put_piece(&mut self, pc: Piece, s: Square) {
         let pt = pc.type_of();
         self.board[s as usize] = pc;
-        self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] |=
-            self.by_type_bb[pc.type_of() as usize];
         self.by_type_bb[pt as usize] |= s;
+        self.by_type_bb[PieceType::AllPieces as usize] |=
+            self.by_type_bb[pt as usize];
         self.by_color_bb[pc.color() as usize] |= s;
         self.piece_count[pc as usize] += 1;
         self.piece_count[make_piece(pc.color(), pc.type_of()) as usize] += 1;
@@ -667,35 +787,29 @@ impl Position {
         }
 
         let mut cuckoo: [Key; 8192] = [0; 8192];
-        let mut cuckoomove: [Key; 8192] = [0; 8192];
-        let zpsq = zobrist::PSQ.get().unwrap();
-        let zside = zobrist::SIDE.get().unwrap();
-        for j in 0..8192 {
-            cuckoo[j] = 0;
-            cuckoomove[j] = 0;
-        }
+        let mut cuckoomove: [Move; 8192] = [Move::none(); 8192];
+        let zpsq = zobrist::get_zobrist_psq();
+        let zside = zobrist::get_zobrist_side();
         let mut count = 0;
-        for i in 0..PNB {
-            for j in SQA1..=SQH8 {
-                let s1 = Square::new_from_n(j as i32);
-                let s2 = Square::new_from_n(s1 as i32 + 1);
-                for k in s2 as usize..=SQH8 {
-                    let pc = Piece::new_from_n(i);
-                    if (pc.type_of() as usize != Piece::WPawn as usize
+        for &pc in &pieces {
+            for i in SQA1..=SQH8 {
+                let s1 = Square::new_from_n(i as i32);
+                for j in i + 1..=SQH8 {
+                    let s2 = Square::new_from_n(j as i32);
+                    if (pc.type_of() as usize != Piece::BPawn as usize
                         && pc.type_of() as usize != Piece::BPawn as usize)
                         && (bb::attacks_bb(pc.type_of(), s1, 0) & s2) != 0
                     {
-                        let mv = Move::new_from_to_sq(s1, s2);
-                        let mut key = zpsq[i][j] ^ zpsq[i][k] ^ zside;
+                        let mut mv = Move::new_from_to_sq(s1, s2);
+                        let mut key = zpsq[pc as usize][i] ^ zpsq[pc as usize][j] ^ zside;
                         let mut m = H1(key);
                         'inner: loop {
                             std::mem::swap(&mut cuckoo[m as usize], &mut key);
-                            std::mem::swap(&mut cuckoo[m as usize], &mut key);
+                            std::mem::swap(&mut cuckoomove[m as usize], &mut mv);
                             if mv == Move::none() {
                                 break 'inner;
                             }
-                            m = ((m == H1(key)) as i32 * H2(key))
-                                + ((m != H1(key)) as i32 * H1(key));
+                            m = if m == H1(key) { H2(key) } else { H1(key) };
                         }
                         count += 1;
                     }
@@ -768,4 +882,97 @@ mod test {
         println!("{}", r_w);
         println!("{}", r_b);
     }
+
+    #[test]
+    fn test_do_move() {
+        bb::init();
+        Position::init();
+        let mut position = Position::default();
+        position.put_piece(Piece::WPawn, Square::SqA2);
+        position.put_piece(Piece::WPawn, Square::SqB2);
+        position.put_piece(Piece::WPawn, Square::SqC2);
+        position.put_piece(Piece::WPawn, Square::SqD2);
+        position.put_piece(Piece::WPawn, Square::SqE2);
+        position.put_piece(Piece::WPawn, Square::SqF2);
+        position.put_piece(Piece::WPawn, Square::SqG2);
+        position.put_piece(Piece::WPawn, Square::SqH2);
+        position.put_piece(Piece::WRook, Square::SqA1);
+        position.put_piece(Piece::WRook, Square::SqH1);
+        position.put_piece(Piece::WKnight, Square::SqB1);
+        position.put_piece(Piece::WKnight, Square::SqG1);
+        position.put_piece(Piece::WBishop, Square::SqC1);
+        position.put_piece(Piece::WBishop, Square::SqF1);
+        position.put_piece(Piece::WKing, Square::SqE1);
+        position.put_piece(Piece::WQueen, Square::SqD1);
+
+        position.put_piece(Piece::BPawn, Square::SqA7);
+        position.put_piece(Piece::BPawn, Square::SqB7);
+        position.put_piece(Piece::BPawn, Square::SqC7);
+        position.put_piece(Piece::BPawn, Square::SqD7);
+        position.put_piece(Piece::BPawn, Square::SqE7);
+        position.put_piece(Piece::BPawn, Square::SqF7);
+        position.put_piece(Piece::BPawn, Square::SqG7);
+        position.put_piece(Piece::BPawn, Square::SqH7);
+
+        position.put_piece(Piece::BRook, Square::SqA8);
+        position.put_piece(Piece::BRook, Square::SqH8);
+        position.put_piece(Piece::BKnight, Square::SqB8);
+        position.put_piece(Piece::BKnight, Square::SqG8);
+        position.put_piece(Piece::BBishop, Square::SqC8);
+        position.put_piece(Piece::BBishop, Square::SqF8);
+        position.put_piece(Piece::BKing, Square::SqE8);
+        position.put_piece(Piece::BQueen, Square::SqD8);
+
+        println!("{}", position);
+        let mut st = StateStack::default();
+        st.push(StateInfo::default());
+        let mv = Move::new_from_to_sq(Square::SqE2, Square::SqE4);
+        let mut newst = StateInfo::default();
+        position.do_move(&mut st, mv, &mut newst, false);
+        println!("{}", position);
+    }
+
+    #[test]
+    fn test_set_check_info() {
+        todo!()
+    }
+
+    fn test_update_sliders_blockers() {
+        todo!()
+    }
+
+    #[test]
+    fn test_macros() {
+        bb::init();
+        Position::init();
+
+        let mut position = Position::default();
+        let pieces_of_types = pieces_of_types!(&position, PieceType::Queen, PieceType::Rook);
+        assert_eq!(pieces_of_types, 0);
+
+        position.put_piece(Piece::WQueen, Square::SqA1);
+        position.put_piece(Piece::WRook, Square::SqE4);
+        let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32;
+        let pieces_of_types = pieces_of_types!(&position, PieceType::Queen, PieceType::Rook);
+        assert_eq!(pieces_of_types, res);
+
+        position.put_piece(Piece::BRook, Square::SqE5);
+        let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32 | 1 << Square::SqE5 as i32;
+        let pieces_of_types = pieces_of_types!(&position, PieceType::Queen, PieceType::Rook);
+        assert_eq!(pieces_of_types, res);
+
+
+        let white_pieces = pieces_by_color_and_pt!(&position, Color::White, PieceType::Rook, PieceType::Queen);
+        let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32;
+        assert_eq!(white_pieces, res);
+
+        let black_pieces = pieces_by_color_and_pt!(&position, Color::Black, PieceType::Rook, PieceType::Queen);
+        let res = 1 << Square::SqE5 as i32;
+        assert_eq!(res, black_pieces);
+
+        let all_pieces = all_pieces!(&position);
+        let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32 | 1 << Square::SqE5 as i32;
+        assert_eq!(all_pieces, res);
+    }
 }
+// rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1

@@ -1,5 +1,6 @@
 use std::ops::{
-    Add, AddAssign, BitAnd, BitOr, BitOrAssign, BitXor, BitXorAssign, Mul, Not, Sub, SubAssign,
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Mul, Not, Sub,
+    SubAssign,
 };
 pub type Bitboard = u64;
 pub type Value = i32;
@@ -57,7 +58,7 @@ pub const FNB: usize = 8;
 pub const RNB: usize = 8;
 
 pub const SQA1: usize = Square::SqA1 as usize;
-pub const SQH8: usize = Square::SqA1 as usize;
+pub const SQH8: usize = Square::SqH8 as usize;
 
 pub const PawnValue: Value = 208;
 pub const KnightValue: Value = 781;
@@ -91,25 +92,6 @@ pub enum Color {
     White = 0,
     Black = 1,
     ColorNb = 2,
-}
-
-#[repr(i32)]
-#[derive(Debug, PartialEq, Clone, Copy, Default)]
-pub enum CastlingRights {
-    NoCastling = 0,
-    WhiteOO = 1,
-    WhiteOOO = 1 << 1,
-    BlackOO = 1 << 2,
-    BlackOOO = 1 << 3,
-
-    KingSide = 1 | (1 << 2),
-    QueenSide = (1 << 1) | (1 << 3),
-    WhiteCastling = 1 | (1 << 1),
-    BlackCastling = (1 << 2) | (1 << 3),
-    #[default]
-    AnyCastling = 1 | (1 << 1) | (1 << 2) | (1 << 3),
-
-    CastlingRightsNb = 16,
 }
 
 #[repr(u8)]
@@ -155,6 +137,7 @@ impl Piece {
             Piece::BQueen => PieceType::Queen,
             Piece::WKing => PieceType::King,
             Piece::BKing => PieceType::King,
+            Piece::NoPiece => PieceType::NoPieceType,
             _ => panic!(),
         }
     }
@@ -174,7 +157,6 @@ impl Piece {
             Piece::BRook => Color::Black,
             Piece::BQueen => Color::Black,
             Piece::BKing => Color::Black,
-
             _ => panic!(),
         }
     }
@@ -419,7 +401,7 @@ impl Sub<Direction> for Square {
     fn sub(self, rhs: Direction) -> Self {
         let result = self as i32 - rhs as i32;
         if result >= 0 && result <= Square::SqH8 as i32 {
-            unsafe { std::mem::transmute(result) }
+            return Square::new_from_n(result);
         } else {
             Square::SqNone
         }
@@ -542,8 +524,8 @@ impl Square {
 }
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PieceType {
-    AllPieces = -1,
-    NoPieceType,
+    NoPieceType = -1,
+    AllPieces,
     Pawn,
     Knight,
     Bishop,
@@ -608,19 +590,83 @@ impl BitXorAssign<Square> for Bitboard {
     }
 }
 
+#[repr(i32)]
+#[derive(Debug, PartialEq, Clone, Copy, Default)]
+pub enum CastlingRights {
+    NoCastling = 0,
+    WhiteOO = 1,
+    WhiteOOO = 1 << 1,
+    BlackOO = 1 << 2,
+    BlackOOO = 1 << 3,
+
+    KingSide = 1 | (1 << 2),
+    QueenSide = (1 << 1) | (1 << 3),
+    WhiteCastling = 1 | (1 << 1),
+    BlackCastling = (1 << 2) | (1 << 3),
+    #[default]
+    AnyCastling = 1 | (1 << 1) | (1 << 2) | (1 << 3),
+
+    CastlingRightsNb = 16,
+}
+
+impl CastlingRights {
+    pub fn new_from_n(n: i32) -> Self {
+        match n {
+            0 => Self::NoCastling,
+            1 => Self::WhiteOO,
+            2 => Self::WhiteOOO,
+            4 => Self::BlackOO,
+            8 => Self::BlackOOO,
+            5 => Self::KingSide,
+            10 => Self::QueenSide,
+            3 => Self::WhiteCastling,
+            12 => Self::BlackCastling,
+            15 => Self::AnyCastling,
+            16 => Self::CastlingRightsNb,
+            _ => panic!(
+                "Cannot create castling rights from {} Invalid Castling Rights number",
+                n
+            ),
+        }
+    }
+}
 //Overload BitAnd Between Color and Castling Rights
 impl BitAnd<Color> for CastlingRights {
     type Output = Self;
     fn bitand(self, rhs: Color) -> CastlingRights {
         match rhs {
-            Color::White => unsafe {
-                std::mem::transmute(CastlingRights::WhiteCastling as i32 & self as i32)
-            },
-            Color::Black => unsafe {
-                std::mem::transmute(CastlingRights::BlackCastling as i32 & self as i32)
-            },
+            Color::White => {
+                CastlingRights::new_from_n(CastlingRights::WhiteCastling as i32 & self as i32)
+            }
+            Color::Black => {
+                CastlingRights::new_from_n(CastlingRights::BlackCastling as i32 & self as i32)
+            }
             _ => panic!(),
         }
+    }
+}
+
+impl BitOr for CastlingRights {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> CastlingRights {
+        let nw = self as i32 | rhs as i32;
+        return CastlingRights::new_from_n(nw);
+    }
+}
+
+impl BitAndAssign for CastlingRights {
+    fn bitand_assign(&mut self, rhs: Self) {
+        let nw = *self as i32 & rhs as i32;
+        let res = CastlingRights::new_from_n(nw);
+        *self = res
+    }
+}
+
+impl Not for CastlingRights {
+    type Output = Self;
+    fn not(self) -> CastlingRights {
+        let nw = self as i32;
+        return CastlingRights::new_from_n(nw);
     }
 }
 
@@ -628,14 +674,14 @@ impl BitAnd for CastlingRights {
     type Output = Self;
     fn bitand(self, rhs: Self) -> Self {
         let res = self as i32 & rhs as i32;
-        unsafe { std::mem::transmute(res) }
+        return CastlingRights::new_from_n(res);
     }
 }
 
 impl BitOrAssign<CastlingRights> for CastlingRights {
     fn bitor_assign(&mut self, rhs: CastlingRights) {
         let res = *self as i32 | rhs as i32;
-        let nw: CastlingRights = unsafe { std::mem::transmute(res) };
+        let nw: CastlingRights = CastlingRights::new_from_n(res);
         *self = nw;
     }
 }
@@ -644,12 +690,12 @@ impl BitAnd<CastlingRights> for Color {
     type Output = CastlingRights;
     fn bitand(self, rhs: CastlingRights) -> CastlingRights {
         match self {
-            Color::White => unsafe {
-                std::mem::transmute(CastlingRights::WhiteCastling as i32 & rhs as i32)
-            },
-            Color::Black => unsafe {
-                std::mem::transmute(CastlingRights::BlackCastling as i32 & rhs as i32)
-            },
+            Color::White => {
+                CastlingRights::new_from_n(CastlingRights::WhiteCastling as i32 & rhs as i32)
+            }
+            Color::Black => {
+                CastlingRights::new_from_n(CastlingRights::BlackCastling as i32 & rhs as i32)
+            }
             _ => panic!(),
         }
     }
@@ -721,7 +767,7 @@ pub const fn pawn_push(color: Color) -> Direction {
     match color {
         Color::White => Direction::North,
         Color::Black => Direction::South,
-        _ => panic!(),
+        _ => panic!("Pawn Push Called with an invalid Color"),
     }
 }
 
@@ -760,7 +806,7 @@ impl Move {
     }
 
     pub const fn new_from_to_sq(from: Square, to: Square) -> Self {
-        let data = ((from as usize) << 6) & to as usize;
+        let data = ((from as usize) << 6) + to as usize;
         Move { data: data as u16 }
     }
     pub const fn from_to(&self) -> u16 {
@@ -1063,6 +1109,7 @@ mod tests {
     #[test]
     fn test_square_new_from_n() {
         assert_eq!(Square::new_from_n(0), Square::SqA1);
+        assert_eq!(Square::new_from_n(1), Square::SqB1);
         assert_eq!(Square::new_from_n(63), Square::SqH8);
         assert_eq!(Square::new_from_n(64), Square::SqNone);
     }
