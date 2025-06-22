@@ -65,6 +65,7 @@ const fn shift(b: Bitboard, d: Direction) -> Bitboard {
         Direction::NorthWest => (b & !FILEABB) << 7,
         Direction::SouthEast => (b & !FILEHBB) >> 7,
         Direction::SouthWest => (b & !FILEABB) >> 9,
+        Direction::None => b,
     }
 }
 
@@ -151,7 +152,7 @@ pub fn rook_attacks_bb(s: Square, occupied: Bitboard) -> Bitboard {
 
 #[inline]
 pub fn pseudo_attacks_bb(pt: PieceType, s: Square) -> Bitboard {
-    if let Some(pseudo_attacks) = PAWN_ATTACKS.get() {
+    if let Some(pseudo_attacks) = PSEUDO_ATTACKS.get() {
         return pseudo_attacks[pt as usize][s as usize];
     }else {
         panic!("Attempt to access pseudo attacks table prior to initialization")

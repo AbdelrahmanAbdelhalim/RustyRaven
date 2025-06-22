@@ -195,6 +195,7 @@ impl Not for Piece {
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Direction {
+    None,
     North = 8,
     East = 1,
     South = -8,
@@ -217,6 +218,7 @@ impl Direction {
             Direction::NorthEast => 8 + 1,
             Direction::SouthEast => -8 + 1,
             Direction::SouthWest => -8 - 1,
+            Direction::None => 0,
         }
     }
 
@@ -832,16 +834,23 @@ impl Move {
     }
 
     pub const fn type_of(&self) -> MoveType {
-        let result = (3 << 14) & self.data;
-        let promotion = 1 << 14;
-        let enPassant = 2 << 14;
-        let castling = 3 << 14;
+        let result = self.data >> 14 & 3;
         match result {
-            0 => MoveType::Normal,
-            promotion => MoveType::Promotion,
-            enpassant => MoveType::EnPassant,
-            castling => MoveType::Castling,
-            _ => panic!(),
+            1 => MoveType::Promotion,
+            2 => MoveType::EnPassant,
+            3 => MoveType::Castling,
+            _=> MoveType::Normal
+        }
+    }
+
+    pub fn set_move_to_variant(&mut self, movetype: MoveType) {
+        self.data &= !(1 << 14);
+        self.data &= !(1 << 15);
+        match movetype {
+            MoveType::Promotion => self.data |= 1 << 14,
+            MoveType::EnPassant => self.data |= 2 << 14,
+            MoveType::Castling => self.data |= 3 << 14,
+            MoveType::Normal => (),
         }
     }
 
@@ -853,6 +862,17 @@ impl Move {
             2 => PieceType::Rook,
             3 => PieceType::Queen,
             _ => panic!(),
+        }
+    }
+
+    pub fn set_promotion_type(&mut self, pt: PieceType) {
+        self.data &= !(1 << 12);
+        self.data &= !(1 << 13);
+        match pt {
+            PieceType::Bishop => self.data |= 1 << 12,
+            PieceType::Rook => self.data |= 2 << 12,
+            PieceType::Queen => self.data |= 3 << 12,
+            _ => (),
         }
     }
 

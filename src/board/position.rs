@@ -4,7 +4,6 @@ use crate::board::bitboard::more_than_one;
 use crate::board::bitboard::pawn_attacks_bb;
 use crate::board::bitboard::RANK1BB;
 use crate::board::bitboard::RANK8BB;
-use crate::board::position_macros;
 use crate::board::zobrist;
 use crate::board::zobrist::CASTLING;
 use crate::board::zobrist::ENPASSANT;
@@ -153,7 +152,7 @@ impl Position {
             board: [Piece::NoPiece; SQNB],
             by_type_bb: [0; PTNB],
             by_color_bb: [0; COLORNB],
-            piece_count: [64; PNB],
+            piece_count: [0; PNB],
             castling_rights_mask: [CastlingRights::new_from_n(0); SQNB],
             castling_rook_square: [Square::default(); CRNB],
             castling_path: [0; CRNB],
@@ -164,16 +163,16 @@ impl Position {
         }
     }
 
-    pub fn st<'a>(&self, state_stack: &'a StateStack) -> &'a StateInfo {
+    fn st<'a>(&self, state_stack: &'a StateStack) -> &'a StateInfo {
         let idx: usize = self.state_idx;
         return &state_stack.states[idx];
     }
 
-    pub fn st_mut<'a>(&self, state_stack: &'a mut StateStack) -> &'a mut StateInfo {
+    fn st_mut<'a>(&self, state_stack: &'a mut StateStack) -> &'a mut StateInfo {
         let idx: usize = self.state_idx;
         return &mut state_stack.states[idx];
     }
-    pub fn set_castling_right(&mut self, c: Color, rfrom: Square, state_stack: &mut StateStack) {
+    fn set_castling_right(&mut self, c: Color, rfrom: Square, state_stack: &mut StateStack) {
         let kfrom = self.square(c, PieceType::King);
         let side;
         if kfrom < rfrom {
@@ -213,7 +212,7 @@ impl Position {
         }
     }
 
-    pub fn set_check_info(&mut self, state_stack: &mut StateStack) {
+    fn set_check_info(&mut self, state_stack: &mut StateStack) {
         self.update_sliders_blockers(Color::White, state_stack);
         self.update_sliders_blockers(Color::Black, state_stack);
 
@@ -234,7 +233,7 @@ impl Position {
         self.st_mut(state_stack).check_squares[PieceType::King as usize] = 0;
     }
 
-    pub fn update_sliders_blockers(&mut self, c: Color, state_stack: &mut StateStack) {
+    fn update_sliders_blockers(&mut self, c: Color, state_stack: &mut StateStack) {
         let ksq: Square = self.square(c, PieceType::King);
         self.st_mut(state_stack).blockers_for_king[c as usize] = 0;
         self.st_mut(state_stack).pinners[!c as usize] = 0;
@@ -260,7 +259,7 @@ impl Position {
         }
     }
 
-    pub fn set_state(&mut self, state_stack: &mut StateStack) {
+    fn set_state(&mut self, state_stack: &mut StateStack) {
         if let Some(nopawns) = zobrist::NOPAWNS.get() {
             self.st_mut(state_stack).pawn_key = *nopawns;
         } else {
@@ -274,7 +273,7 @@ impl Position {
         self.set_check_info(state_stack);
     }
 
-    pub fn attackers_to(&self, s: Square, occupied: Bitboard) -> Bitboard {
+    fn attackers_to(&self, s: Square, occupied: Bitboard) -> Bitboard {
         return (bb::get_pawn_attacks_bb(Color::Black, s)
             & pieces_by_color_and_pt!(self, Color::White, PieceType::Pawn))
             | (bb::get_pawn_attacks_bb(Color::White, s)
@@ -288,7 +287,7 @@ impl Position {
             | bb::get_pseudo_attacks(PieceType::King, s) & pieces_of_types!(self, PieceType::King);
     }
 
-    pub fn legal(self, m: Move, state_stack: &StateStack) -> bool {
+    fn legal(self, m: Move, state_stack: &StateStack) -> bool {
         assert!(&m.is_ok());
         let us: Color = self.side_to_move;
         let from = m.from_sq();
@@ -339,7 +338,7 @@ impl Position {
             || bb::alligned(from, to, self.square(us, PieceType::King));
     }
 
-    pub fn pseudo_legal(&self, m: Move, state_stack: &StateStack) -> bool {
+    fn pseudo_legal(&self, m: Move, state_stack: &StateStack) -> bool {
         assert!(m.is_ok());
 
         let us: Color = self.side_to_move;
@@ -400,7 +399,7 @@ impl Position {
         true
     }
 
-    pub fn gives_check(&self, m: Move, state_stack: &StateStack) -> bool {
+    fn gives_check(&self, m: Move, state_stack: &StateStack) -> bool {
         assert!(m.is_ok());
         assert!(self.moved_piece(m).color() == self.side_to_move);
         let from: Square = m.from_sq();
@@ -467,12 +466,16 @@ impl Position {
         gives_check: bool,
     ) {
         assert!(m.is_ok());
+
+        //Get Different Zobrist Tables
         let zobrist_side = zobrist::get_zobrist_side();
-        let mut k: Key = zobrist_side ^ self.st(state_stack).key;
         let zobrist_psq = zobrist::get_zobrist_psq();
         let zobrist_enpassant = zobrist::get_zobrist_enpassant();
 
+        let mut k: Key = zobrist_side ^ self.st(state_stack).key;
         //Partial copy of some of the fields of the old state. The rest is recomputed anyway
+
+        //Setting up to add the new state
         self.st(state_stack).copy_from_old_to_new(new_state);
         self.state_idx = state_stack.states.len();
         state_stack.push(*new_state);
@@ -482,29 +485,41 @@ impl Position {
 
         let us: Color = self.side_to_move;
         let them: Color = !us;
-        let from: Square = m.from_sq();
-        let to: Square = m.to_sq();
+        let mut from: Square = m.from_sq();
+        let mut to: Square = m.to_sq();
         let pc: Piece = self.piece_on(from);
 
-        let captured: Piece = if m.type_of() == MoveType::EnPassant {
+        assert!(self.piece_on(from) != Piece::NoPiece);
+
+        //Special Case if the move is Enpassant
+        let mut captured: Piece = if m.type_of() == MoveType::EnPassant {
             make_piece(them, PieceType::Pawn)
         } else {
             self.piece_on(to)
         };
 
         assert!(pc.color() == us);
-        //debugging here
         assert!(captured.type_of() != PieceType::King);
 
+        //Handle Castling
         if m.type_of() == MoveType::Castling {
-            todo!()
+            let mut rfrom: Square = Square::SqNone;
+            let mut rto: Square = Square::SqNone;
+            self.do_castling(us, &mut from, &mut to, &mut rfrom, &mut rto);
+            k ^= zobrist_psq[captured as usize][rfrom as usize]
+                ^ zobrist_psq[captured as usize][rto as usize];
+            captured = Piece::NoPiece;
         }
 
+        //Handling Captures
         if captured != Piece::NoPiece {
             let mut capsq: Square = to;
             if captured.type_of() == PieceType::Pawn {
-                capsq -= pawn_push(us);
-                let zobrist_psq = zobrist::get_zobrist_psq();
+                capsq -= if m.type_of() == MoveType::EnPassant {
+                    pawn_push(us)
+                } else {
+                    Direction::None
+                };
                 self.st_mut(state_stack).pawn_key ^= zobrist_psq[captured as usize][capsq as usize];
             } else {
                 self.st_mut(state_stack).non_pawn_material[them as usize] -=
@@ -531,6 +546,7 @@ impl Position {
             k ^= zobrist_enpassant[self.st(state_stack).ep_square.file_of() as usize];
             self.st_mut(state_stack).ep_square = Square::SqNone;
         }
+
         if self.st(state_stack).castling_rights != CastlingRights::NoCastling
             && self.castling_rights_mask[from as usize] | self.castling_rights_mask[to as usize]
                 != CastlingRights::NoCastling
@@ -542,10 +558,12 @@ impl Position {
             k ^= zobrist_castling[self.st(&state_stack).castling_rights as usize];
         }
 
+        //Actually Move the Piece
         if m.type_of() != MoveType::Castling {
             self.move_piece(from, to);
         }
 
+        //Special Hnadling if the Moved. Handle Promotion and Some Enpassant Stuff.
         if pc.type_of() == PieceType::Pawn {
             if to as i32 ^ from as i32 == 16
             // todo: I Don't like the cast to u64 when calling pawn_push here
@@ -555,7 +573,9 @@ impl Position {
             {
                 self.st_mut(state_stack).ep_square = to - pawn_push(us);
                 k ^= zobrist_enpassant[self.st(&state_stack).ep_square.file_of() as usize];
-            } else if m.type_of() == MoveType::Promotion {
+            }
+
+            if m.type_of() == MoveType::Promotion {
                 let promotion: Piece = make_piece(us, m.promotion_type());
                 let promotion_type: PieceType = promotion.type_of();
 
@@ -615,12 +635,13 @@ impl Position {
         } else {
             0
         };
-        self.side_to_move = !self.side_to_move;
-        //todo next:: test this and all its inner functions
-        self.set_check_info(state_stack);
 
+        self.side_to_move = !self.side_to_move;
+        //Todo:: Test this Function Fully.
+        self.set_check_info(state_stack);
         self.st_mut(state_stack).repition = 0;
 
+        //Three-Fold Repitition
         let end = std::cmp::min(
             self.st(state_stack).rule_50,
             self.st(state_stack).plies_from_null,
@@ -630,6 +651,101 @@ impl Position {
             todo!()
         }
     }
+
+    pub fn undo_move(&mut self, mv: Move, state_stack: &mut StateStack) {
+        assert!(mv.is_ok());
+
+        self.side_to_move = !self.side_to_move;
+        let us: Color = self.side_to_move;
+        let mut from: Square = mv.from_sq();
+        let mut to: Square = mv.to_sq();
+
+        assert!(self.empty(from) || mv.type_of() == MoveType::Castling);
+        assert!(self.st(state_stack).captured_piece.type_of() != PieceType::King);
+
+        if mv.type_of() == MoveType::Promotion {
+            self.remove_piece(to);
+            let pc = make_piece(us, PieceType::Pawn);
+            self.put_piece(pc, from);
+        } else if mv.type_of() == MoveType::Castling {
+            let mut rfrom: Square = Square::SqNone;
+            let mut rto: Square = Square::SqNone;
+            self.undo_castling(us, &mut from, &mut to, &mut rfrom, &mut rto);
+        } else {
+            self.move_piece(to, from);
+
+            if self.st(&state_stack).captured_piece != Piece::NoPiece {
+                let mut capsq: Square = to;
+                if mv.type_of() == MoveType::EnPassant {
+                    capsq -= pawn_push(us);
+                }
+                self.put_piece(self.st(&state_stack).captured_piece, capsq);
+            }
+        }
+        self.state_idx -= 1;
+        self.game_ply -= 1;
+    }
+
+    fn do_castling(
+        &mut self,
+        side: Color,
+        from: &mut Square,
+        to: &mut Square,
+        rfrom: &mut Square,
+        rto: &mut Square,
+    ) {
+        let kingside: bool = to > from;
+        *rfrom = *to;
+        *rto = if kingside {
+            Square::SqF1.relative_square(side)
+        } else {
+            Square::SqD1.relative_square(side)
+        };
+
+        *to = if kingside {
+            Square::SqG1.relative_square(side)
+        } else {
+            Square::SqC1.relative_square(side)
+        };
+
+        self.remove_piece(*from);
+        self.remove_piece(*rfrom);
+        self.board[*from as usize] = Piece::NoPiece;
+        self.board[*rfrom as usize] = Piece::NoPiece;
+        self.put_piece(make_piece(side, PieceType::King), *to);
+        self.put_piece(make_piece(side, PieceType::King), *to);
+    }
+
+    fn undo_castling(
+        &mut self,
+        side: Color,
+        from: &mut Square,
+        to: &mut Square,
+        rfrom: &mut Square,
+        rto: &mut Square,
+    ) {
+        let kingside: bool = to > from;
+        *rfrom = *to;
+        *rto = if kingside {
+            Square::SqF1.relative_square(side)
+        } else {
+            Square::SqD1.relative_square(side)
+        };
+
+        *to = if kingside {
+            Square::SqG1.relative_square(side)
+        } else {
+            Square::SqC1.relative_square(side)
+        };
+
+        self.remove_piece(*to);
+        self.remove_piece(*rto);
+        self.board[*to as usize] = Piece::NoPiece;
+        self.board[*rto as usize] = Piece::NoPiece;
+        self.put_piece(make_piece(side, PieceType::King), *from);
+        self.put_piece(make_piece(side, PieceType::King), *rfrom);
+    }
+
     #[inline]
     fn square(&self, c: Color, pt: PieceType) -> Square {
         return Square::new_from_n(pieces_by_color_and_pt!(&self, c, pt).trailing_zeros() as i32);
@@ -639,117 +755,116 @@ impl Position {
     //     self.state_stack.current_mut()
     // }
     #[inline]
-    pub fn side_to_move(&self) -> Color {
+    fn side_to_move(&self) -> Color {
         self.side_to_move
     }
 
     #[inline]
-    pub fn piece_on(&self, s: Square) -> Piece {
+    fn piece_on(&self, s: Square) -> Piece {
         self.board[s as usize]
     }
 
     #[inline]
-    pub fn empty(&self, s: Square) -> bool {
+    fn empty(&self, s: Square) -> bool {
         self.board[s as usize] == Piece::NoPiece
     }
 
     #[inline]
-    pub fn moved_piece(&self, m: Move) -> Piece {
+    fn moved_piece(&self, m: Move) -> Piece {
         self.piece_on(m.from_sq())
     }
 
     #[inline]
-    pub fn pieces_by_piecetype(&self, pt: PieceType) -> Bitboard {
+    fn pieces_by_piecetype(&self, pt: PieceType) -> Bitboard {
         self.by_type_bb[pt as usize]
     }
 
     #[inline]
-    pub fn pieces_by_color(&self, color: Color) -> Bitboard {
+    fn pieces_by_color(&self, color: Color) -> Bitboard {
         self.by_color_bb[color as usize]
     }
 
     #[inline]
-    pub fn ep_square(&self, state_stack: &StateStack) -> Square {
+    fn ep_square(&self, state_stack: &StateStack) -> Square {
         self.st(state_stack).ep_square
     }
 
     #[inline]
-    pub fn can_castle(&self, cr: CastlingRights, state_stack: &StateStack) -> bool {
+    fn can_castle(&self, cr: CastlingRights, state_stack: &StateStack) -> bool {
         self.st(state_stack).castling_rights as i32 & cr as i32 != 0
     }
 
     #[inline]
-    pub fn checkers(&self, state_stack: &StateStack) -> Bitboard {
+    fn checkers(&self, state_stack: &StateStack) -> Bitboard {
         self.st(state_stack).checkers_bb
     }
 
     #[inline]
-    pub fn blockers_for_king(&self, c: Color, state_stack: &StateStack) -> Bitboard {
+    fn blockers_for_king(&self, c: Color, state_stack: &StateStack) -> Bitboard {
         self.st(state_stack).blockers_for_king[c as usize]
     }
 
     #[inline]
-    pub fn pinners(&self, c: Color, state_stack: &StateStack) -> Bitboard {
+    fn pinners(&self, c: Color, state_stack: &StateStack) -> Bitboard {
         self.st(state_stack).pinners[c as usize]
     }
 
     #[inline]
-    pub fn check_squares(&self, pt: PieceType, state_stack: &StateStack) -> Bitboard {
+    fn check_squares(&self, pt: PieceType, state_stack: &StateStack) -> Bitboard {
         self.st(state_stack).check_squares[pt as usize]
     }
 
     #[inline]
-    pub fn pawn_key(&self, state_stack: &StateStack) -> Key {
+    fn pawn_key(&self, state_stack: &StateStack) -> Key {
         self.st(state_stack).pawn_key
     }
 
     #[inline]
-    pub fn material_key(&self, state_stack: &StateStack) -> Key {
+    fn material_key(&self, state_stack: &StateStack) -> Key {
         self.st(state_stack).material_key
     }
 
     #[inline]
-    pub fn non_pawn_material(&self, c: Color, state_stack: &StateStack) -> Value {
+    fn non_pawn_material(&self, c: Color, state_stack: &StateStack) -> Value {
         self.st(state_stack).non_pawn_material[c as usize]
     }
 
     #[inline]
-    pub fn game_ply(&self) -> i32 {
+    fn game_ply(&self) -> i32 {
         self.game_ply
     }
 
     #[inline]
-    pub fn rule50_count(&self, state_stack: &StateStack) -> i32 {
+    fn rule50_count(&self, state_stack: &StateStack) -> i32 {
         self.st(state_stack).rule_50
     }
 
     #[inline]
-    pub fn captured_piece(&self, state_stack: &StateStack) -> Piece {
+    fn captured_piece(&self, state_stack: &StateStack) -> Piece {
         self.st(state_stack).captured_piece
     }
 
-    pub fn put_piece(&mut self, pc: Piece, s: Square) {
+    fn put_piece(&mut self, pc: Piece, s: Square) {
         let pt = pc.type_of();
         self.board[s as usize] = pc;
         self.by_type_bb[pt as usize] |= s;
-        self.by_type_bb[PieceType::AllPieces as usize] |=
-            self.by_type_bb[pt as usize];
+        self.by_type_bb[PieceType::AllPieces as usize] |= self.by_type_bb[pt as usize];
         self.by_color_bb[pc.color() as usize] |= s;
         self.piece_count[pc as usize] += 1;
         self.piece_count[make_piece(pc.color(), pc.type_of()) as usize] += 1;
     }
 
-    pub fn remove_piece(&mut self, s: Square) {
+    fn remove_piece(&mut self, s: Square) {
         let pc = self.board[s as usize];
         self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] ^= s;
         self.by_type_bb[pc.type_of() as usize] ^= s;
         self.by_color_bb[pc.color() as usize] ^= s;
         self.board[s as usize] = Piece::NoPiece;
         self.piece_count[pc as usize] -= 1;
-        self.piece_count[make_piece(pc.color(), PieceType::AllPieces) as usize] -= 1;
+        self.piece_count[make_piece(pc.color(), pc.type_of()) as usize] -= 1;
     }
 
-    pub fn move_piece(&mut self, f: Square, t: Square) {
+    fn move_piece(&mut self, f: Square, t: Square) {
         let pc = self.board[f as usize];
         let from_to: Bitboard = f.bb() | t;
         self.by_type_bb[(PieceType::AllPieces as i32 + 1) as usize] ^= from_to;
@@ -820,7 +935,7 @@ impl Position {
     }
 
     #[inline]
-    pub fn pieces(&self, pt: PieceType) -> Bitboard {
+    fn pieces(&self, pt: PieceType) -> Bitboard {
         return self.by_type_bb[pt as usize];
     }
 }
@@ -866,23 +981,6 @@ mod test {
         println!("{}", r);
     }
 
-    // @todo: Expand this function's testing
-    #[test]
-    fn test_pieces_by_color_and_piece_types_macro() {
-        let mut position = Position::default();
-        position.put_piece(Piece::BBishop, Square::SqA1);
-        position.put_piece(Piece::WBishop, Square::SqA8);
-        position.put_piece(Piece::WRook, Square::SqE4);
-        let res_b =
-            pieces_by_color_and_pt!(&position, Color::Black, PieceType::Bishop, PieceType::Rook);
-        let res_w =
-            pieces_by_color_and_pt!(&position, Color::White, PieceType::Bishop, PieceType::Rook);
-        let r_w = bb::pretty(res_w);
-        let r_b = bb::pretty(res_b);
-        println!("{}", r_w);
-        println!("{}", r_b);
-    }
-
     #[test]
     fn test_do_move() {
         bb::init();
@@ -926,10 +1024,134 @@ mod test {
         println!("{}", position);
         let mut st = StateStack::default();
         st.push(StateInfo::default());
-        let mv = Move::new_from_to_sq(Square::SqE2, Square::SqE4);
         let mut newst = StateInfo::default();
-        position.do_move(&mut st, mv, &mut newst, false);
+
+        //@Todo: Separate these three functions neatly
+        test_normal_move_do_undo(&mut position, &mut newst, &mut st);
+        test_enpassant_do_undo(&mut position, &mut newst, &mut st);
+        test_promotion_moves(&mut position, &mut newst, &mut st);
+    }
+
+    fn test_enpassant_do_undo(position: &mut Position, newst: &mut StateInfo, st: &mut StateStack) {
+        let e2e4: Move = Move::new_from_to_sq(Square::SqE2, Square::SqE4);
+        let d7d5: Move = Move::new_from_to_sq(Square::SqD7, Square::SqD5);
+        let e4e5: Move = Move::new_from_to_sq(Square::SqE4, Square::SqE5);
+        let f7f5: Move = Move::new_from_to_sq(Square::SqF7, Square::SqF5);
+        let mut ef: Move = Move::new_from_to_sq(Square::SqE5, Square::SqF6);
+
+        ef.set_move_to_variant(MoveType::EnPassant);
+        assert!(ef.type_of() == MoveType::EnPassant);
+
+        position.do_move(st, e2e4, newst, false);
+        println!("1.E4\n{}", &position);
+
+        position.do_move(st, d7d5, newst, false);
+        println!("1..D5\n{}", &position);
+
+        position.do_move(st, e4e5, newst, false);
+        println!("2.E5\n{}", &position);
+
+        position.do_move(st, f7f5, newst, false);
+        println!("2..F5\n{}", &position);
+
+        position.do_move(st, ef, newst, false);
+        println!("3..EF\n{}", &position);
+    }
+
+    fn test_normal_move_do_undo(
+        position: &mut Position,
+        newst: &mut StateInfo,
+        st: &mut StateStack,
+    ) {
+        let e4: Move = Move::new_from_to_sq(Square::SqE2, Square::SqE4);
+        let d5: Move = Move::new_from_to_sq(Square::SqD7, Square::SqD5);
+        let ed: Move = Move::new_from_to_sq(Square::SqE4, Square::SqD5);
+        let nf6: Move = Move::new_from_to_sq(Square::SqG8, Square::SqF6);
+        let d4: Move = Move::new_from_to_sq(Square::SqD2, Square::SqD4);
+        let nxd5: Move = Move::new_from_to_sq(Square::SqF6, Square::SqD5);
+
+        position.do_move(st, e4, newst, false);
+        println!("1.E4\n{}", &position);
+        position.do_move(st, d5, newst, false);
+        println!("1...D5\n{}", &position);
+        position.do_move(st, ed, newst, false);
+        println!("2.ED\n{}", &position);
+        position.do_move(st, nf6, newst, false);
+        println!("2..Nf6\n{}", &position);
+        position.do_move(st, d4, newst, false);
+        println!("3.D4\n{}", &position);
+        position.do_move(st, nxd5, newst, false);
+        println!("3...NxD5\n{}", &position);
+
+        position.undo_move(nxd5, st);
+        position.undo_move(d4, st);
+        position.undo_move(nf6, st);
+
         println!("{}", position);
+    }
+
+    fn test_promotion_moves(position: &mut Position, newst: &mut StateInfo, st: &mut StateStack) {
+        position.remove_piece(Square::SqG7);
+        position.remove_piece(Square::SqG8);
+
+        position.put_piece(Piece::WPawn, Square::SqG7);
+        println!("1.Position Before Promotion\n{}", &position);
+
+        //Test Promotion Without Capturing
+        let mut promote_no_capture = Move::new_from_to_sq(Square::SqG7, Square::SqG8);
+        promote_no_capture.set_move_to_variant(MoveType::Promotion);
+
+        //Test Knight Promotion No Capture
+        promote_no_capture.set_promotion_type(PieceType::Knight);
+        position.do_move(st, promote_no_capture, newst, false);
+        println!("1.Knight Promote\n{}", &position);
+        position.undo_move(promote_no_capture, st);
+
+        //Test Bishop Promotion No Capture
+        promote_no_capture.set_promotion_type(PieceType::Bishop);
+        position.do_move(st, promote_no_capture, newst, false);
+        println!("1.Bishop Promote\n{}", &position);
+        position.undo_move(promote_no_capture, st);
+
+        //Test Rook Promotion No Capture
+        promote_no_capture.set_promotion_type(PieceType::Rook);
+        position.do_move(st, promote_no_capture, newst, false);
+        println!("1.Rook Promote\n{}", &position);
+        position.undo_move(promote_no_capture, st);
+
+        //Test Queen Promotion No Capture
+        promote_no_capture.set_promotion_type(PieceType::Queen);
+        position.do_move(st, promote_no_capture, newst, false);
+        println!("1.Queen Promote\n{}", &position);
+        position.undo_move(promote_no_capture, st);
+
+        //Promoting While Capturing a Piece
+        let mut promote_capture = Move::new_from_to_sq(Square::SqG7, Square::SqH8);
+        promote_capture.set_move_to_variant(MoveType::Promotion);
+
+        //Test Knight Promotion Capture
+        promote_capture.set_promotion_type(PieceType::Knight);
+        position.do_move(st, promote_capture, newst, false);
+        println!("1.Knight Promote\n{}", &position);
+        position.undo_move(promote_capture, st);
+
+        //Test Bishop Promotion Capture
+        promote_capture.set_promotion_type(PieceType::Bishop);
+        position.do_move(st, promote_capture, newst, false);
+        println!("1.Bishop Promote\n{}", &position);
+        position.undo_move(promote_capture, st);
+
+        //Test Rook Promotion Capture
+        promote_capture.set_promotion_type(PieceType::Rook);
+        position.do_move(st, promote_capture, newst, false);
+        println!("1.Rook Promote\n{}", &position);
+        position.undo_move(promote_capture, st);
+
+        //Test Queen Promotion Capture
+        promote_capture.set_promotion_type(PieceType::Queen);
+        position.do_move(st, promote_capture, newst, false);
+        println!("1.Queen Promote\n{}", &position);
+        position.undo_move(promote_capture, st);
     }
 
     #[test]
@@ -957,21 +1179,24 @@ mod test {
         assert_eq!(pieces_of_types, res);
 
         position.put_piece(Piece::BRook, Square::SqE5);
-        let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32 | 1 << Square::SqE5 as i32;
+        let res: u64 =
+            1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32 | 1 << Square::SqE5 as i32;
         let pieces_of_types = pieces_of_types!(&position, PieceType::Queen, PieceType::Rook);
         assert_eq!(pieces_of_types, res);
 
-
-        let white_pieces = pieces_by_color_and_pt!(&position, Color::White, PieceType::Rook, PieceType::Queen);
+        let white_pieces =
+            pieces_by_color_and_pt!(&position, Color::White, PieceType::Rook, PieceType::Queen);
         let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32;
         assert_eq!(white_pieces, res);
 
-        let black_pieces = pieces_by_color_and_pt!(&position, Color::Black, PieceType::Rook, PieceType::Queen);
+        let black_pieces =
+            pieces_by_color_and_pt!(&position, Color::Black, PieceType::Rook, PieceType::Queen);
         let res = 1 << Square::SqE5 as i32;
         assert_eq!(res, black_pieces);
 
         let all_pieces = all_pieces!(&position);
-        let res: u64 = 1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32 | 1 << Square::SqE5 as i32;
+        let res: u64 =
+            1 << Square::SqE4 as i32 | 1 << Square::SqA1 as i32 | 1 << Square::SqE5 as i32;
         assert_eq!(all_pieces, res);
     }
 }
