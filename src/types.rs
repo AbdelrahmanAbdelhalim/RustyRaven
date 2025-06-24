@@ -815,6 +815,10 @@ impl Move {
         self.data & 0xFFF
     }
 
+    pub fn set_from_move(&mut self, m: Move) {
+        self.data = m.data;
+    }
+
     pub const fn from_sq(&self) -> Square {
         let result = (self.data >> 6) & 0x3F;
         if Square::is_square_valid(result as i32) {
