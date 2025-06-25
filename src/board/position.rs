@@ -5,17 +5,12 @@ use crate::board::bitboard::pawn_attacks_bb;
 use crate::board::bitboard::RANK1BB;
 use crate::board::bitboard::RANK8BB;
 use crate::board::zobrist;
-use crate::board::zobrist::CASTLING;
-use crate::board::zobrist::ENPASSANT;
-use crate::misc::*;
 use crate::types::*;
 use std::fmt;
-use std::os::macos::raw::stat;
 use std::sync::OnceLock;
 use std::vec::Vec;
 
 use super::bitboard::attacks_bb;
-use super::bitboard::get_pseudo_attacks;
 use super::bitboard::pseudo_attacks_bb;
 use super::bitboard::BETWEEN_BB;
 
@@ -26,6 +21,7 @@ const MAX_PLY: usize = 246; // Maximum search depth
 pub static CUCKOO: OnceLock<[Key; 8192]> = OnceLock::new();
 pub static CUCKOO_MOVE: OnceLock<[Key; 8192]> = OnceLock::new();
 
+#[macro_export]
 macro_rules! pieces_of_types {
     ($pos: expr, $pt: expr) => {
         $pos.pieces_by_piecetype($pt)
@@ -36,6 +32,7 @@ macro_rules! pieces_of_types {
     }
 }
 
+#[macro_export]
 macro_rules! pieces_by_color_and_pt {
     ($pos: expr, $color: expr, $pt: expr) => {
         pieces_of_types!($pos, $pt)
@@ -46,6 +43,7 @@ macro_rules! pieces_by_color_and_pt {
     };
 }
 
+#[macro_export]
 macro_rules! all_pieces {
     ($pos: expr) => {
         pieces_of_types!($pos, PieceType::AllPieces)
@@ -128,7 +126,7 @@ impl StateStack {
     }
 }
 
-struct Position {
+pub struct Position {
     board: [Piece; SQNB],
     by_type_bb: [Bitboard; PTNB],
     by_color_bb: [Bitboard; COLORNB],

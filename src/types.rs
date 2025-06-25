@@ -899,6 +899,10 @@ impl Move {
     pub const fn is_ok(&self) -> bool {
         self.data != Self::none().data && self.data != Self::null().data
     }
+
+    pub fn make(move_type: MoveType, from: Square, to: Square, pt: PieceType) {
+
+    }
 }
 
 #[cfg(test)]
