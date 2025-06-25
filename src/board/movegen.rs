@@ -1,4 +1,5 @@
 use crate::types::*;
+const MAX_MOVES: usize = 256;
 
 pub enum GenType {
     Captures,
@@ -21,5 +22,5 @@ impl ExtMove {
 }
 
 struct MoveList {
-
+    moveList: [ExtMove; MAX_MOVES],
 }
