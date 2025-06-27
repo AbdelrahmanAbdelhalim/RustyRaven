@@ -1,7 +1,10 @@
+use crate::all_pieces;
+use crate::board::bitboard as bb;
 use crate::board::bitboard::get_pawn_attacks_bb;
 use crate::board::position as pos;
+use crate::pieces_by_color_and_pt;
+use crate::pieces_of_types;
 use crate::types::*;
-use crate::board::bitboard as bb;
 
 const MAX_MOVES: usize = 256;
 
@@ -137,13 +140,54 @@ pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
     target: Bitboard,
 ) {
     let us = C::COLOR;
+    let gen_type = T::GEN_TYPE;
     let them = !us;
-    let TRank7BB = if us == Color::White {bb::RANK7BB} else {bb::RANK2BB};
-    let TRank3BB = if us == Color::White {bb::RANK3BB} else {bb::RANK6BB}; 
-    let dir: Direction = pawn_push(us);
-    let up_right  = if us == Color::White {Direction::NorthEast} else {Direction::SouthWest};
-    let up_left  = if us == Color::White {Direction::NorthWest} else {Direction::SouthEast};
+    let TRank7BB = if us == Color::White {
+        bb::RANK7BB
+    } else {
+        bb::RANK2BB
+    };
+    let TRank3BB = if us == Color::White {
+        bb::RANK3BB
+    } else {
+        bb::RANK6BB
+    };
+    let up: Direction = pawn_push(us);
+    let up_right = if us == Color::White {
+        Direction::NorthEast
+    } else {
+        Direction::SouthWest
+    };
+    let up_left = if us == Color::White {
+        Direction::NorthWest
+    } else {
+        Direction::SouthEast
+    };
 
+    let empty_squares: Bitboard = !pos.all_pieces();
+    let enemies = if gen_type == GenType::Evasions {
+        pos.checkers()
+    } else {
+        pos.pieces_by_color(them)
+    };
+    let pawns_on_7th = pieces_by_color_and_pt!(pos, us, PieceType::Pawn) & TRank7BB;
+    let pawns_not_on_7th = pieces_by_color_and_pt!(pos, us, PieceType::Pawn) & !TRank7BB;
+
+    if gen_type != GenType::Captures {
+        let mut b1 = bb::shift(pawns_on_7th, up) & empty_squares;
+        let mut b2 = bb::shift(b1 & TRank3BB, up) & empty_squares;
+
+        if gen_type == GenType::Evasions {
+            b1 &= target;
+            b2 &= target;
+        }
+
+        if gen_type == GenType::QuietChecks {
+            let ksq = pos.square(them, PieceType::King);
+            let dcCandidatePawns = pos.blockers_for_king(them) & !ksq.file_bb(); 
+            // b1 &= pos.pawn_attacks_bb(them, ksq) | bb::shift(dcCandidatePawns, up);
+        }
+    }
 }
 pub fn generate<C: ColorInfo, T: GenTypeInfo>(
     pos: &pos::Position,

@@ -55,7 +55,7 @@ fn distance(x: Square, y: Square) -> u8 {
     sqdt[x as usize][y as usize]
 }
 
-const fn shift(b: Bitboard, d: Direction) -> Bitboard {
+pub const fn shift(b: Bitboard, d: Direction) -> Bitboard {
     match d {
         Direction::North => b << 8,
         Direction::South => b >> 8,
