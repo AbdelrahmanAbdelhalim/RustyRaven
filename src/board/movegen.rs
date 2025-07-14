@@ -6,6 +6,8 @@ use crate::pieces_by_color_and_pt;
 use crate::pieces_of_types;
 use crate::types::*;
 
+use super::bitboard::pop_lsb;
+
 const MAX_MOVES: usize = 256;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -105,18 +107,35 @@ impl DirectionType for South_East {
 impl DirectionType for South_West {
     const DIR: Direction = Direction::SouthWest;
 }
+
 impl ExtMove {
-    fn set_from_move(&mut self, m: Move) {
-        self.set_from_move(m);
+    pub fn new_from_move(m: Move) -> Self {
+        Self { base: m, value: 0 }
     }
 }
 
 struct MoveList {
-    moveList: [ExtMove; MAX_MOVES],
+    move_list: Vec<ExtMove>,
+}
+
+impl MoveList {
+    pub fn new() -> Self {
+        Self {
+            move_list: Vec::with_capacity(MAX_MOVES),
+        }
+    }
+
+    pub fn push_move(&mut self, mv: Move) {
+        self.move_list.push(ExtMove::new_from_move(mv));
+    }
+
+    pub fn push_move_ext_move(&mut self, mv: ExtMove) {
+        self.move_list.push(mv);
+    }
 }
 
 pub fn make_promotions<T: GenTypeInfo, D: DirectionType, const Enemy: bool>(
-    move_list: &mut Vec<ExtMove>,
+    move_list: &mut MoveList,
     to: Square,
 ) -> usize {
     let gen_type: GenType = T::GEN_TYPE;
@@ -134,6 +153,7 @@ pub fn make_promotions<T: GenTypeInfo, D: DirectionType, const Enemy: bool>(
     }
     cur
 }
+
 pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
     pos: &pos::Position,
     move_list: &mut MoveList,
@@ -158,6 +178,7 @@ pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
     } else {
         Direction::SouthWest
     };
+
     let up_left = if us == Color::White {
         Direction::NorthWest
     } else {
@@ -182,10 +203,86 @@ pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
             b2 &= target;
         }
 
-        if gen_type == GenType::QuietChecks {
-            let ksq = pos.square(them, PieceType::King);
-            let dcCandidatePawns = pos.blockers_for_king(them) & !ksq.file_bb(); 
-            // b1 &= pos.pawn_attacks_bb(them, ksq) | bb::shift(dcCandidatePawns, up);
+        while b1 != 0 {
+            let to = b1.trailing_zeros();
+            let to = Square::new_from_n(to as i32);
+            b1 = b1 & b1 - 1; // Pop LSB
+            move_list.push_move(Move::new_from_to_sq(to - up, to));
+        }
+
+        while b2 != 0 {
+            let to = b2.trailing_zeros();
+            let to = Square::new_from_n(to as i32);
+            b2 = b2 & b2 - 1;
+            move_list.push_move(Move::new_from_to_sq(to - up - up, to));
+        }
+
+        if pawns_not_on_7th != 0 {
+            let mut b1 = bb::shift(pawns_not_on_7th, up_right) & enemies;
+            let mut b2 = bb::shift(pawns_not_on_7th, up_left) & enemies;
+            let mut b3 = bb::shift(pawns_not_on_7th, up) & empty_squares;
+
+            if gen_type == GenType::Evasions {
+                b3 &= target;
+            }
+            while b1 > 0 {
+                if C::COLOR == Color::White {
+                    make_promotions::<T, North_East, true>(
+                        move_list,
+                        Square::new_from_n(b1.trailing_zeros() as i32),
+                    );
+                } else {
+                    make_promotions::<T, South_West, true>(
+                        move_list,
+                        Square::new_from_n(b1.trailing_zeros() as i32),
+                    );
+                }
+                b1 &= b1 - 1; //remove lsb
+            }
+
+            while b2 > 0 {
+                if C::COLOR == Color::White {
+                    make_promotions::<T, North_West, true>(
+                        move_list,
+                        Square::new_from_n(b1.trailing_zeros() as i32),
+                    );
+                } else {
+                    make_promotions::<T, South_East, true>(
+                        move_list,
+                        Square::new_from_n(b1.trailing_zeros() as i32),
+                    );
+                }
+                b2 &= b2 - 1; //remove lsb
+            }
+
+            while b3 > 0 {
+                if C::COLOR == Color::White {
+                    make_promotions::<T, North, false>(
+                        move_list,
+                        Square::new_from_n(b1.trailing_zeros() as i32),
+                    );
+                } else {
+                    make_promotions::<T, South, false>(
+                        move_list,
+                        Square::new_from_n(b1.trailing_zeros() as i32),
+                    );
+                }
+                b3 &= b3 - 1; //remove lsb
+            }
+        }
+
+        if T::GEN_TYPE == GenType::Captures
+            || T::GEN_TYPE == GenType::Evasions
+            || T::GEN_TYPE == GenType::NonEvasions
+        {
+            let mut b1 = bb::shift(pawns_not_on_7th, up_left) & enemies;
+            let mut b2 = bb::shift(pawns_not_on_7th, up_right) & enemies;
+
+            while b1 != 0 {
+                let to = Square::new_from_n(b1.trailing_zeros() as i32);
+                move_list.push_move(Move::new_from_to_sq(to - up_right, to));
+                b1 &= b1 - 1; //pop lsb
+            }
         }
     }
 }

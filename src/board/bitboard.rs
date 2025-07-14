@@ -163,6 +163,7 @@ const fn rank_bb(r: Rank) -> Bitboard {
     RANK1BB << (8 * r as i32)
 }
 
+//@TODO: Possibly change this to a regular mut. Bitboard is a u64.
 pub fn pop_lsb(bb: &mut Bitboard) -> Square {
     let ret: Square = Square::new_from_n(bb.trailing_zeros() as i32);
     let qbb = *bb as u64 - 1;
