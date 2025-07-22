@@ -283,10 +283,35 @@ pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
                 move_list.push_move(Move::new_from_to_sq(to - up_right, to));
                 b1 &= b1 - 1; //pop lsb
             }
+
+            while b2 != 0 {
+                let to = Square::new_from_n(b2.trailing_zeros() as i32);
+                move_list.push_move(Move::new_from_to_sq(to - up_right, to));
+                b2 &= b2 - 1; //pop lsb
+            }
+
+            if pos.ep_square() != Square::SqNone {
+                if T::GEN_TYPE == GenType::Evasions {
+                    if target & (pos.ep_square() + up) != 0 {
+                        return;
+                    }
+                }
+
+                b1 = pawns_not_on_7th & bb::get_pawn_attacks_bb(them, pos.ep_square());
+                //TODO: Push Enpassant Move
+                todo!();
+            }
         }
     }
 }
-pub fn generate<C: ColorInfo, T: GenTypeInfo>(
+pub fn generate<C: ColorInfo, T: GenTypeInfo, const Checks: bool>(
+    pos: &pos::Position,
+    move_list: &mut Vec<ExtMove>,
+    target: Bitboard,
+) {
+}
+
+pub fn generate_all<C: ColorInfo, T: GenTypeInfo>(
     pos: &pos::Position,
     move_list: &mut Vec<ExtMove>,
     target: Bitboard,

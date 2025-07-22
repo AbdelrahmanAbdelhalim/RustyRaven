@@ -774,7 +774,7 @@ impl Position {
     }
 
     #[inline]
-    fn ep_square(&self) -> Square {
+    pub fn ep_square(&self) -> Square {
         self.st().ep_square
     }
 

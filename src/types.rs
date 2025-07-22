@@ -901,7 +901,7 @@ impl Move {
     }
 
     pub fn make(move_type: MoveType, from: Square, to: Square, pt: PieceType) {
-
+        todo!();
     }
 }
 
