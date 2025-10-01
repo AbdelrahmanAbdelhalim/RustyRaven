@@ -49,6 +49,7 @@ macro_rules! all_pieces {
         pieces_of_types!($pos, PieceType::AllPieces)
     };
 }
+
 const pieces: [Piece; 12] = [
     Piece::WPawn,
     Piece::WKnight,
@@ -63,10 +64,12 @@ const pieces: [Piece; 12] = [
     Piece::BQueen,
     Piece::BKing,
 ];
+
 #[inline]
 fn H1(h: Key) -> i32 {
     (h & 0x1fff) as i32
 }
+
 #[inline]
 fn H2(h: Key) -> i32 {
     ((h >> 16) & 0x1fff) as i32
@@ -94,6 +97,7 @@ struct StateInfo {
     captured_piece: Piece,
     repition: i32,
 }
+
 impl StateInfo {
     pub fn copy_from_old_to_new(&self, newst: &mut StateInfo) {
         newst.material_key = self.material_key;
@@ -105,6 +109,7 @@ impl StateInfo {
         newst.ep_square = self.ep_square;
     }
 }
+
 #[derive(Default)]
 struct StateStack {
     states: Vec<StateInfo>,
@@ -141,10 +146,6 @@ pub struct Position {
 }
 
 impl Position {
-    // pub const fn default() -> Self {
-    //     // let prng = Prng::new(1070372);
-
-    // }
     fn default() -> Self {
         Self {
             board: [Piece::NoPiece; SQNB],
@@ -300,6 +301,7 @@ impl Position {
             return false;
         }
 
+        
         if m.type_of() == MoveType::Castling {
             to = if to > from {
                 Square::SqG1
@@ -743,8 +745,9 @@ impl Position {
     // fn st_mut(&mut self) -> &mut StateInfo {
     //     self.state_stack.current_mut()
     // }
+    
     #[inline]
-    fn side_to_move(&self) -> Color {
+    pub fn side_to_move(&self) -> Color {
         self.side_to_move
     }
 

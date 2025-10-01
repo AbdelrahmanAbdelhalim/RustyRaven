@@ -20,17 +20,20 @@ pub enum GenType {
     Legal,
 }
 
-struct ExtMove {
+pub struct ExtMove {
     base: Move,
     value: i32,
 }
 
 //Using Marker Types and Marker Traits:
+
 pub struct White;
 pub struct Black;
+
 pub trait ColorInfo {
     const COLOR: Color;
 }
+
 
 impl ColorInfo for White {
     const COLOR: Color = Color::White;
@@ -147,7 +150,6 @@ pub fn make_promotions<T: GenTypeInfo, D: DirectionType, const Enemy: bool>(
         cur += 1;
         todo!();
     }
-
     if gen_type == GenType::Evasions && Enemy || (gen_type == GenType::Quiets && !Enemy) || all {
         todo!();
     }
@@ -178,7 +180,6 @@ pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
     } else {
         Direction::SouthWest
     };
-
     let up_left = if us == Color::White {
         Direction::NorthWest
     } else {
@@ -303,17 +304,4 @@ pub fn generate_pawn_moves<T: GenTypeInfo, C: ColorInfo>(
             }
         }
     }
-}
-pub fn generate<C: ColorInfo, T: GenTypeInfo, const Checks: bool>(
-    pos: &pos::Position,
-    move_list: &mut Vec<ExtMove>,
-    target: Bitboard,
-) {
-}
-
-pub fn generate_all<C: ColorInfo, T: GenTypeInfo>(
-    pos: &pos::Position,
-    move_list: &mut Vec<ExtMove>,
-    target: Bitboard,
-) {
 }
