@@ -56,7 +56,6 @@ pub const COLORNB: usize = Color::ColorNb as usize;
 pub const CRNB: usize = CastlingRights::CastlingRightsNb as usize;
 pub const FNB: usize = 8;
 pub const RNB: usize = 8;
-
 pub const SQA1: usize = Square::SqA1 as usize;
 pub const SQH8: usize = Square::SqH8 as usize;
 
