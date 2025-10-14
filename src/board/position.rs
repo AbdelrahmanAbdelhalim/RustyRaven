@@ -307,8 +307,7 @@ impl Position {
                 Square::SqG1
             } else {
                 Square::SqC1
-            }
-            .relative_square(us);
+            }.relative_square(us);
 
             let step: Direction = if to > from {
                 Direction::West

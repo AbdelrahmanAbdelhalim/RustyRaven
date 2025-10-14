@@ -49,7 +49,7 @@ const PIECEVALE: [Value; Piece::PieceNb as usize] = [
 const RANK1BB: Bitboard = 0xFF;
 const FILEABB: Bitboard = 0x0101010101010101;
 
-pub const SQNB: usize = Square::SquareNb as usize - 1; //Poissibly move these constants to the types file
+pub const SQNB: usize = Square::SquareNb as usize; //Poissibly move these constants to the types file
 pub const PNB: usize = Piece::PieceNb as usize;
 pub const PTNB: usize = PieceType::PieceTypeNb as usize;
 pub const COLORNB: usize = Color::ColorNb as usize;
@@ -351,7 +351,6 @@ pub enum Square {
     SqG3,
     SqH3,
     SqA4,
-    SqBA4,
     SqC4,
     SqD4,
     SqE4,
@@ -842,7 +841,7 @@ impl Move {
             1 => MoveType::Promotion,
             2 => MoveType::EnPassant,
             3 => MoveType::Castling,
-            _=> MoveType::Normal
+            _ => MoveType::Normal,
         }
     }
 

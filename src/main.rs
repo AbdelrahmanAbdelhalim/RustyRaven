@@ -1,5 +1,4 @@
-mod types;
 mod board;
 mod misc;
-fn main() {
-}
+mod types;
+fn main() {}
