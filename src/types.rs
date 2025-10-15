@@ -27,6 +27,57 @@ const BISHOPVALUE: Value = 825;
 const ROOKVALUE: Value = 1276;
 const QUEENVALUE: Value = 2538;
 
+//Constants to allow for compile time optimizaitons
+//@todo: Possibly Convert them to macros instead
+pub const WHITE: i32 = Color::White as i32;
+pub const BLACK: i32 = Color::Black as i32;
+pub const CAPTURES: i32 = GenType::Captures as i32;
+pub const QUIETS: i32 = GenType::Quiets as i32;
+pub const QUIET_CHECKS: i32 = GenType::QuietChecks as i32;
+pub const EVASIONS: i32 = GenType::Evasions as i32;
+pub const NON_EVASIONS: i32 = GenType::NonEvasions as i32;
+pub const LEGAL: i32 = GenType::Legal as i32;
+
+pub const NORTH: i32 = Direction::North as i32;
+pub const SOUTH: i32 = Direction::South as i32;
+pub const EAST: i32 = Direction::East as i32;
+pub const WEST: i32 = Direction::West as i32;
+pub const NORTH_EAST: i32 = Direction::NorthEast as i32;
+pub const NORTH_WEST: i32 = Direction::NorthWest as i32;
+pub const SOUTH_EAST: i32 = Direction::SouthEast as i32;
+pub const SOUTH_WEST: i32 = Direction::SouthWest as i32;
+
+const fn bind_color(n: i32) -> Color {
+    match n {
+        WHITE => Color::White,
+        BLACK => Color::Black,
+        _ => unreachable!(),
+    }
+}
+
+const fn bind_gentype(n: i32) -> GenType {
+    match n {
+        CAPTURES => GenType::Captures,
+        QUIETS => GenType::Quiets,
+        QUIET_CHECKS => GenType::QuietChecks,
+        EVASIONS => GenType::Evasions,
+        NON_EVASIONS => GenType::NonEvasions,
+        LEGAL => GenType::Legal,
+        _ => unreachable!(),
+    }
+}
+
+#[repr(i32)]
+#[derive(Debug, PartialEq)]
+pub enum GenType {
+    Captures = 0,
+    Quiets = 1,
+    QuietChecks = 2,
+    Evasions = 3,
+    NonEvasions = 4,
+    Legal = 5,
+}
+
 const PIECEVALE: [Value; Piece::PieceNb as usize] = [
     VALUE_ZERO,
     PAWNVALUE,
@@ -235,6 +286,7 @@ impl Direction {
         }
     }
 }
+
 // Overloading Addition operator between Square and Direction
 // Two Variants to allow for addition from either side
 impl Add<Direction> for Square {
@@ -248,6 +300,7 @@ impl Add<Direction> for Square {
         }
     }
 }
+
 impl Add<i32> for Square {
     type Output = Self;
     fn add(self, rhs: i32) -> Self {
@@ -259,6 +312,7 @@ impl Add<i32> for Square {
         }
     }
 }
+
 impl Add<Square> for Direction {
     type Output = Square;
     fn add(self, rhs: Square) -> Square {
